@@ -240,13 +240,40 @@ def send_license_email(email, license_key, is_trial=True):
     try:
         validate_smtp_config()
         
-        subject = "Your License Key"
+        subject = "Welcome to StoryboardMaker Pro - Your License Key"
         body = f"""
-        Welcome!
-        
-        Your license key is: {license_key}
-        
-        {"This license is valid for 30 days." if is_trial else "This is a permanent license."}
+Dear StoryboardMaker Pro User,
+
+Thank you for choosing StoryboardMaker Pro! I'm excited to have you join our community of creative professionals.
+
+Here's your license key to get started:
+
+    {license_key}
+
+{'Your trial license is valid for 30 days, giving you full access to explore all premium features.' if is_trial else 'Your license has been activated with full access to all premium features.'}
+
+Getting Started:
+1. Launch StoryboardMaker Pro
+2. Click on 'Enter License' in the settings menu
+3. Copy and paste your license key
+4. Start creating amazing storyboards!
+
+Key Features You Can Now Access:
+• Professional template library
+• Advanced export options
+• Custom panel layouts
+• High-resolution exports
+• And much more!
+
+Need Help?
+If you have any questions or need assistance, don't hesitate to contact our support team at storyboardmakerpro@dityan.com
+
+{'Make the most of your 30-day trial! We hope StoryboardMaker Pro helps bring your visual stories to life.' if is_trial else 'We hope StoryboardMaker Pro helps bring your visual stories to life.'}
+
+Best regards,
+The StoryboardMaker Pro Creator
+
+Note: Please keep this email for your records. Your license key may be needed for future reinstallations.
         """
         
         msg = MIMEText(body)
