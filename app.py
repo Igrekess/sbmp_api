@@ -229,57 +229,54 @@ class KeygenAPI:
         except KeygenError:
             return []
 
-@staticmethod
-def validate_license(email, license_key, fingerprint):
-    try:
-        # Correction de l'URL de validation
-        license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/actions/validate"
-        license_response = requests.post(  # Changement de GET à POST
-            license_url,
-            headers=KeygenAPI.get_headers(),
-            json={
-                "meta": {
-                    "key": license_key,
-                    "scope": {
-                        "user": email,
-                        "fingerprint": fingerprint
+    @staticmethod
+    def validate_license(email, license_key, fingerprint):
+        try:
+            license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/actions/validate"
+            license_response = requests.post(
+                license_url,
+                headers=KeygenAPI.get_headers(),
+                json={
+                    "meta": {
+                        "key": license_key,
+                        "scope": {
+                            "user": email,
+                            "fingerprint": fingerprint
+                        }
                     }
                 }
+            )
+            license_data = KeygenAPI.handle_response(license_response)
+
+            result = {
+                "success": False,
+                "expiry": None,
+                "maxMachines": None,
+                "status": "INVALID"
             }
-        )
-        license_data = KeygenAPI.handle_response(license_response)
 
-        result = {
-            "success": False,
-            "expiry": None,
-            "maxMachines": None,
-            "status": "INVALID"
-        }
+            if not license_data.get("meta", {}).get("valid"):
+                return result
 
-        if not license_data.get("meta", {}).get("valid"):
+            # Récupérer les détails de la licence
+            license_attrs = license_data.get("data", {}).get("attributes", {})
+            result.update({
+                "success": True,
+                "expiry": license_attrs.get("expiry"),
+                "maxMachines": license_attrs.get("maxMachines"),
+                "status": license_attrs.get("status", "ACTIVE")
+            })
+
             return result
 
-        # Récupérer les détails de la licence
-        license_attrs = license_data.get("data", {}).get("attributes", {})
-        result.update({
-            "success": True,
-            "expiry": license_attrs.get("expiry"),
-            "maxMachines": license_attrs.get("maxMachines"),
-            "status": license_attrs.get("status", "ACTIVE")
-        })
-
-        # Le reste du code reste identique mais n'est plus nécessaire car la validation
-        # avec scope gère déjà la vérification de l'utilisateur et du fingerprint
-        return result
-
-    except Exception as e:
-        logger.error(f"License validation failed: {str(e)}")
-        return {
-            "success": False,
-            "expiry": None,
-            "maxMachines": None,
-            "status": "ERROR"
-        }
+        except Exception as e:
+            logger.error(f"License validation failed: {str(e)}")
+            return {
+                "success": False,
+                "expiry": None,
+                "maxMachines": None,
+                "status": "ERROR"
+            }
 
     @staticmethod
     def create_machine(license_id, fingerprint):
@@ -448,12 +445,33 @@ def validate_license():
         
         validate_email(data['email'])
         
+        # Validation de la licence
         validation_result = KeygenAPI.validate_license(
             data['email'],
             data['licenseKey'],
             data['fingerprint']
         )
         
+        if not validation_result["success"]:
+            # Si la validation échoue, vérifier si le fingerprint doit être enregistré
+            license_id = data['licenseKey']
+            try:
+                KeygenAPI.create_machine(license_id, data['fingerprint'])
+                # Réessayer la validation après l'enregistrement du fingerprint
+                validation_result = KeygenAPI.validate_license(
+                    data['email'],
+                    data['licenseKey'],
+                    data['fingerprint']
+                )
+            except KeygenError as e:
+                logger.error(f"Failed to register fingerprint: {str(e)}")
+                return jsonify({
+                    "success": False,
+                    "expiry": None,
+                    "maxMachines": None,
+                    "status": "ERROR"
+                }), 400
+
         return jsonify(validation_result), 200 if validation_result["success"] else 401
 
     except ValueError:
