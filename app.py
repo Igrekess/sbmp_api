@@ -68,7 +68,13 @@ class KeygenAPI:
             logger.debug(f"API Response Content: {response.text}")
             
             response.raise_for_status()
-            return response.json()
+            user_data = response.json()
+            
+            # Mettre à jour le statut de l'utilisateur en INACTIVE
+            user_id = user_data['data']['id']
+            KeygenAPI.update_user_status(user_id, 'INACTIVE')
+            
+            return user_data
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Error creating user: {e}")
@@ -107,21 +113,20 @@ class KeygenAPI:
             return None
 
     @staticmethod
-    def create_license(user_id, license_type, name):
-        logger.info(f"Creating {license_type} license for user {user_id}")
-        policy_id = KeygenAPI.get_policy_id(license_type)
+    def create_license(user_id, license_type):
+        logger.info(f"Creating license for user {user_id}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
         payload = {
             "data": {
                 "type": "licenses",
                 "attributes": {
-                    "name": name
+                    "name": f"License for {user_id}"
                 },
                 "relationships": {
                     "policy": {
                         "data": {
                             "type": "policies",
-                            "id": policy_id
+                            "id": KeygenAPI.get_policy_id(license_type)
                         }
                     },
                     "user": {
@@ -142,13 +147,15 @@ class KeygenAPI:
             )
             
             logger.debug(f"API Response Status: {response.status_code}")
+            logger.debug(f"API Response Headers: {response.headers}")
             logger.debug(f"API Response Content: {response.text}")
             
             response.raise_for_status()
-            return response.json()["data"]["id"]
+            return response.json()
+        
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to create license: {str(e)}")
-            raise ValueError(f"Failed to create license: {str(e)}")
+            logger.error(f"Error creating license: {e}")
+            return None
 
     @staticmethod
     def create_activation_token(user_id):
