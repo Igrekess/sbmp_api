@@ -259,15 +259,11 @@ class KeygenAPI:
             "Content-Type": "application/json"
         }
         
+        # Format corrigé de la payload selon l'API Keygen
         payload = {
-            "data": {
-                "type": "validations",
-                "attributes": {
-                    "fingerprint": fingerprint,
-                    "metadata": {
-                        "email": email
-                    }
-                }
+            "meta": {
+                "fingerprint": fingerprint,
+                "email": email
             }
         }
         
@@ -279,6 +275,7 @@ class KeygenAPI:
                 return {"success": True}
             else:
                 error_msg = response_data.get('errors', [{'detail': 'Validation failed'}])[0]['detail']
+                logger.error(f"License validation failed: {error_msg}")
                 return {"success": False, "error": error_msg}
                 
         except Exception as e:
