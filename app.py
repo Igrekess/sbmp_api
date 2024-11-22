@@ -24,24 +24,37 @@ class KeygenAPI:
         return Config.TRIAL_POLICY_ID if license_type.lower() == 'trial' else Config.STANDALONE_POLICY_ID
     @staticmethod
     def create_user(first_name, last_name, email):
-        response = requests.post(
-            f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/users",
-            json={
-                "data": {
-                    "type": "users",
-                    "attributes": {
-                        "first-name": first_name,
-                        "last-name": last_name,
-                        "email": email,
-                        "status": "INACTIVE"
-                    }
+        print("Creating user with:", {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email
+        })
+        
+        api_url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/users"
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "data": {
+                "type": "users",
+                "attributes": {
+                    "first-name": first_name,
+                    "last-name": last_name,
+                    "email": email,
+                    "status": "INACTIVE"
                 }
-            },
-            headers={
-                "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
-                "Content-Type": "application/json"
             }
-        )
+        }
+        
+        print("Sending request to:", api_url)
+        print("Headers:", headers)
+        print("Payload:", payload)
+        
+        response = requests.post(api_url, json=payload, headers=headers)
+        print("Response status:", response.status_code)
+        print("Response body:", response.text)
+        
         response.raise_for_status()
         return response.json()["data"]["id"]
 
@@ -243,6 +256,12 @@ def send_activation_email(email, activation_token):
 
 @app.route('/create-user', methods=['POST'])
 def create_user():
+    print("Received data:", request.json)
+    print("Config values:", {
+        "ACCOUNT_ID": Config.ACCOUNT_ID,
+        "PRODUCT_TOKEN": Config.PRODUCT_TOKEN[:10] + "...",  # Tronqué pour la sécurité
+        "TRIAL_POLICY_ID": Config.TRIAL_POLICY_ID
+    })
     data = request.json
     required_fields = ['firstName', 'lastName', 'email', 'licenseType', 'fingerprint']
     
