@@ -259,11 +259,23 @@ class KeygenAPI:
             "Content-Type": "application/json"
         }
         
-        # Format corrigé de la payload selon l'API Keygen
         payload = {
-            "meta": {
-                "fingerprint": fingerprint,
-                "email": email
+            "data": {
+                "type": "validations",
+                "attributes": {
+                    "fingerprint": fingerprint,
+                    "metadata": {
+                        "email": email
+                    }
+                },
+                "relationships": {
+                    "license": {
+                        "data": {
+                            "type": "licenses",
+                            "id": license_id
+                        }
+                    }
+                }
             }
         }
         
