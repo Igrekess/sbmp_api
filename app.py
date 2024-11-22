@@ -230,62 +230,86 @@ class KeygenAPI:
             return []
 
     @staticmethod
-    def validate_license(email, license_key, fingerprint):
-        try:
-            license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/validate"
-            license_response = requests.get(
-                license_url,
-                headers=KeygenAPI.get_headers()
+def validate_license(email, license_key, fingerprint):
+    try:
+        license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/validate"
+        license_response = requests.get(
+            license_url,
+            headers=KeygenAPI.get_headers()
+        )
+        license_data = KeygenAPI.handle_response(license_response)
+
+        result = {
+            "success": False,
+            "expiry": None,
+            "maxMachines": None,
+            "status": "INVALID"
+        }
+
+        if not license_data.get("meta", {}).get("valid"):
+            return result
+
+        # Récupérer les détails de la licence
+        license_attrs = license_data.get("data", {}).get("attributes", {})
+        result.update({
+            "success": True,
+            "expiry": license_attrs.get("expiry"),
+            "maxMachines": license_attrs.get("maxMachines"),
+            "status": license_attrs.get("status", "ACTIVE")
+        })
+
+        # Vérifier l'utilisateur
+        user_id = license_data.get("data", {}).get("relationships", {}).get("user", {}).get("data", {}).get("id")
+        if not user_id:
+            return result
+
+        user_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
+        user_response = requests.get(
+            user_url,
+            headers=KeygenAPI.get_headers()
+        )
+        user_data = KeygenAPI.handle_response(user_response)
+
+        user_email = user_data.get("data", {}).get("attributes", {}).get("email")
+        if not user_email or user_email != email:
+            return result
+
+        # Vérifier les machines
+        machines_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/machines"
+        machines_response = requests.get(
+            machines_url,
+            headers=KeygenAPI.get_headers()
+        )
+        machines_data = KeygenAPI.handle_response(machines_response)
+        machines = machines_data.get("data", [])
+
+        if not machines:
+            try:
+                KeygenAPI.create_machine(license_key, fingerprint)
+                return result
+            except Exception:
+                return result
+        else:
+            fingerprint_valid = any(
+                machine.get("attributes", {}).get("fingerprint") == fingerprint 
+                for machine in machines
             )
-            license_data = KeygenAPI.handle_response(license_response)
-
-            if not license_data.get("meta", {}).get("valid"):
-                return False
-
-            user_id = license_data.get("data", {}).get("relationships", {}).get("user", {}).get("data", {}).get("id")
-            if not user_id:
-                return False
-
-            user_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
-            user_response = requests.get(
-                user_url,
-                headers=KeygenAPI.get_headers()
-            )
-            user_data = KeygenAPI.handle_response(user_response)
-
-            user_email = user_data.get("data", {}).get("attributes", {}).get("email")
-            if not user_email or user_email != email:
-                return False
-
-            machines_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/machines"
-            machines_response = requests.get(
-                machines_url,
-                headers=KeygenAPI.get_headers()
-            )
-            machines_data = KeygenAPI.handle_response(machines_response)
-            machines = machines_data.get("data", [])
-
-            if not machines:
+            if not fingerprint_valid:
                 try:
                     KeygenAPI.create_machine(license_key, fingerprint)
-                    return True
                 except Exception:
-                    return False
-            else:
-                fingerprint_valid = any(
-                    machine.get("attributes", {}).get("fingerprint") == fingerprint 
-                    for machine in machines
-                )
-                if not fingerprint_valid:
-                    try:
-                        KeygenAPI.create_machine(license_key, fingerprint)
-                        return True
-                    except Exception:
-                        return False
-                return True
+                    return result
 
-        except Exception:
-            return False
+        return result
+
+    except Exception as e:
+        logger.error(f"License validation failed: {str(e)}")
+        return {
+            "success": False,
+            "expiry": None,
+            "maxMachines": None,
+            "status": "ERROR"
+        }
 
     @staticmethod
     def create_machine(license_id, fingerprint):
@@ -454,18 +478,29 @@ def validate_license():
         
         validate_email(data['email'])
         
-        is_valid = KeygenAPI.validate_license(
+        validation_result = KeygenAPI.validate_license(
             data['email'],
             data['licenseKey'],
             data['fingerprint']
         )
-        return jsonify({"success": is_valid}), 200 if is_valid else 401
+        
+        return jsonify(validation_result), 200 if validation_result["success"] else 401
 
     except ValueError:
-        return jsonify({"success": False}), 400
+        return jsonify({
+            "success": False,
+            "expiry": None,
+            "maxMachines": None,
+            "status": "ERROR"
+        }), 400
     except Exception:
-        return jsonify({"success": False}), 500
-
+        return jsonify({
+            "success": False,
+            "expiry": None,
+            "maxMachines": None,
+            "status": "ERROR"
+        }), 500
+    
 @app.errorhandler(404)
 def not_found_error(error):
     return jsonify({"success": False}), 404
