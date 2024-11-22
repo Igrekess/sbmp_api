@@ -323,7 +323,7 @@ def send_license_email(email, license_key, first_name, is_trial=True):
         body = f"""
 Dear {first_name},
 
-Thank you for choosing StoryboardMaker Pro! We're excited to have you join our community of creative professionals.
+Thank you for choosing StoryboardMaker Pro! I'm excited to have you join the growing community of photo DITs, photographers, and creative teams using this tool to streamline their workflow.
 
 Here's your license key to get started:
 
@@ -331,26 +331,30 @@ Here's your license key to get started:
 
 {'Your trial license is valid for 30 days, giving you full access to explore all premium features.' if is_trial else 'Your license has been activated with full access to all premium features.'}
 
+Your trial license is valid for 30 days, giving you full access to explore all the premium features.
+
 Getting Started:
-1. Launch StoryboardMaker Pro
-2. Click on 'Enter License' in the settings menu
-3. Copy and paste your license key
-4. Start creating amazing storyboards!
+
+   1 Launch Capture One.
+   2 Start Storyboard maker pro create or setup.
+   3 Enter your mail and copy and paste your license key.
+   4 Start creating layouts, boards, or storyboards directly from Capture One!
 
 Key Features You Can Now Access:
-• Professional template library
-• Advanced export options
-• Custom panel layouts
-• High-resolution exports
-• And much more!
+• Professional layout and board templates tailored for Capture One workflows.
+• Advanced export options for seamless integration into creative projects.
+• Custom panel layouts to suit your needs.
+• High-resolution exports for professional delivery.
+• Tools designed to optimize the workflow of photo DITs, photographers, and creative teams.
 
 Need Help?
-If you have any questions or need assistance, don't hesitate to contact our support team at support@storyboardmaker.pro
+If you have any questions or need assistance, feel free to contact me at support@dityan.com.
 
-{'Make the most of your 30-day trial! We hope StoryboardMaker Pro helps bring your visual stories to life.' if is_trial else 'We hope StoryboardMaker Pro helps bring your visual stories to life.'}
+Make the most of your 30-day trial! I hope StoryboardMaker Pro helps you save time and elevate your creative output.
 
 Best regards,
-The StoryboardMaker Pro Team
+Yan Senez
+Creator of StoryboardMaker Pro
 
 Note: Please keep this email for your records. Your license key may be needed for future reinstallations.
         """
