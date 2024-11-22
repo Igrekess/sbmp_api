@@ -189,57 +189,35 @@ class KeygenAPI:
         return KeygenAPI.handle_response(response)
 
     @staticmethod
-    def create_license(user_id, first_name, last_name, license_type):
-        logger.info(f"Creating {license_type} license for user {first_name} {last_name}")
-        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
+    def create_license(user_id, policy_id, first_name, last_name, fingerprint):
+        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses"
         
-        expiry = None
-        if license_type.lower() == 'trial':
-            expiry = "30d"
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
         
         payload = {
             "data": {
                 "type": "licenses",
                 "attributes": {
-                    "name": f"License for {first_name} {last_name}"
+                    "metadata": {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "fingerprint": fingerprint
+                    }
                 },
                 "relationships": {
-                    "policy": {
-                        "data": {
-                            "type": "policies",
-                            "id": KeygenAPI.get_policy_id(license_type)
-                        }
-                    },
-                    "user": {
-                        "data": {
-                            "type": "users",
-                            "id": user_id
-                        }
-                    }
+                    "policy": {"data": {"type": "policies", "id": policy_id}},
+                    "user": {"data": {"type": "users", "id": user_id}}
                 }
             }
         }
         
-        if expiry:
-            payload["data"]["attributes"]["expiry"] = expiry
-        
-        try:
-            response = requests.post(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Headers: {response.headers}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 201:
             return response.json()
-        
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error creating license: {e}")
-            return None
+        raise KeygenError(f"Failed to create license: {response.text}")
 
     @staticmethod
     def get_license_id_by_key(license_key):
@@ -457,14 +435,10 @@ def validate_json_payload(*required_fields):
     return decorator
 
 @app.route('/create', methods=['POST'])
-@validate_json_payload('first_name', 'last_name', 'email')
+@validate_json_payload('first_name', 'last_name', 'email', 'fingerprint', 'license_type')
 def create_license():
     try:
         data = request.get_json()
-        
-        # Ajout d'un type de licence par défaut pour les essais
-        data['license_type'] = data.get('license_type', 'trial')
-        data['fingerprint'] = data.get('fingerprint', '')
         
         # Validation
         try:
@@ -477,27 +451,45 @@ def create_license():
 
         # Vérifier utilisateur existant
         existing_user = KeygenAPI.get_user_by_email(data['email'])
-        
         if existing_user and data['license_type'] == 'trial':
             return jsonify({"success": False, "error": "User already has a trial license"}), HTTPStatus.CONFLICT
 
-        # Créer/obtenir utilisateur
-        if existing_user:
-            user_id = existing_user['id']
-        else:
+        # Créer nouvel utilisateur si nécessaire
+        if not existing_user:
             user_result = KeygenAPI.create_user(
                 data['first_name'],
                 data['last_name'],
                 data['email']
             )
             user_id = user_result['data']['id']
+        else:
+            user_id = existing_user['id']
 
-        # Créer la licence
-        policy_id = Config.TRIAL_POLICY_ID if data['license_type'] == 'trial' else get_policy_id(data['license_type'])
-        license_result = KeygenAPI.create_license(user_id, policy_id)
+        # Déterminer policy_id
+        policy_mapping = {
+            'trial': Config.TRIAL_POLICY_ID,
+            'standalone': Config.STANDALONE_POLICY_ID,
+            'enterprise6': Config.ENTERPRISE6_POLICY_ID,
+            'enterprise10': Config.ENTERPRISE10_POLICY_ID,
+            'enterprise20': Config.ENTERPRISE20_POLICY_ID
+        }
+        policy_id = policy_mapping.get(data['license_type'])
+        
+        if not policy_id:
+            return jsonify({"success": False, "error": "Invalid license type"}), HTTPStatus.BAD_REQUEST
+
+        # Créer licence avec fingerprint
+        license_result = KeygenAPI.create_license(
+            user_id=user_id,
+            policy_id=policy_id,
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            fingerprint=data['fingerprint']
+        )
         
         # Envoyer email
-        if send_license_email(data['email'], license_result['data']['attributes']['key'], data['license_type']):
+        license_key = license_result['data']['attributes']['key']
+        if send_license_email(data['email'], license_key, data['license_type']):
             return jsonify({"success": True}), HTTPStatus.CREATED
         else:
             return jsonify({"success": False, "error": "Failed to send email"}), HTTPStatus.INTERNAL_SERVER_ERROR
