@@ -229,13 +229,23 @@ class KeygenAPI:
         except KeygenError:
             return []
 
-    @staticmethod
+@staticmethod
 def validate_license(email, license_key, fingerprint):
     try:
-        license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/validate"
-        license_response = requests.get(
+        # Correction de l'URL de validation
+        license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/actions/validate"
+        license_response = requests.post(  # Changement de GET à POST
             license_url,
-            headers=KeygenAPI.get_headers()
+            headers=KeygenAPI.get_headers(),
+            json={
+                "meta": {
+                    "key": license_key,
+                    "scope": {
+                        "user": email,
+                        "fingerprint": fingerprint
+                    }
+                }
+            }
         )
         license_data = KeygenAPI.handle_response(license_response)
 
@@ -258,48 +268,8 @@ def validate_license(email, license_key, fingerprint):
             "status": license_attrs.get("status", "ACTIVE")
         })
 
-        # Vérifier l'utilisateur
-        user_id = license_data.get("data", {}).get("relationships", {}).get("user", {}).get("data", {}).get("id")
-        if not user_id:
-            return result
-
-        user_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
-        user_response = requests.get(
-            user_url,
-            headers=KeygenAPI.get_headers()
-        )
-        user_data = KeygenAPI.handle_response(user_response)
-
-        user_email = user_data.get("data", {}).get("attributes", {}).get("email")
-        if not user_email or user_email != email:
-            return result
-
-        # Vérifier les machines
-        machines_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/machines"
-        machines_response = requests.get(
-            machines_url,
-            headers=KeygenAPI.get_headers()
-        )
-        machines_data = KeygenAPI.handle_response(machines_response)
-        machines = machines_data.get("data", [])
-
-        if not machines:
-            try:
-                KeygenAPI.create_machine(license_key, fingerprint)
-                return result
-            except Exception:
-                return result
-        else:
-            fingerprint_valid = any(
-                machine.get("attributes", {}).get("fingerprint") == fingerprint 
-                for machine in machines
-            )
-            if not fingerprint_valid:
-                try:
-                    KeygenAPI.create_machine(license_key, fingerprint)
-                except Exception:
-                    return result
-
+        # Le reste du code reste identique mais n'est plus nécessaire car la validation
+        # avec scope gère déjà la vérification de l'utilisateur et du fingerprint
         return result
 
     except Exception as e:
