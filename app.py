@@ -37,7 +37,6 @@ class KeygenAPI:
                     "first-name": first_name,
                     "last-name": last_name,
                     "email": email,
-                    "status": "INACTIVE"
                 }
             }
         }
