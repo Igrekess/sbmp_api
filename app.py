@@ -189,7 +189,7 @@ class KeygenAPI:
         return KeygenAPI.handle_response(response)
 
     @staticmethod
-    def create_license(user_id, policy_id, first_name, last_name, fingerprint):
+    def create_license(user_id, policy_id, first_name, last_name):
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses"
         
         headers = {
@@ -203,8 +203,7 @@ class KeygenAPI:
                 "attributes": {
                     "metadata": {
                         "first_name": first_name,
-                        "last_name": last_name,
-                        "fingerprint": fingerprint
+                        "last_name": last_name
                     }
                 },
                 "relationships": {
@@ -296,44 +295,33 @@ class KeygenAPI:
             }
 
     @staticmethod
-    def create_machine(license_id, first_name, last_name, fingerprint):
-        logger.info(f"Creating machine for user {first_name} {last_name} with license ID {license_id}")
-        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/machines"
+    def create_machine(license_id, fingerprint):
+        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/machines"
+        
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
         payload = {
             "data": {
                 "type": "machines",
                 "attributes": {
                     "fingerprint": fingerprint,
-                    "name": f"Machine for {first_name} {last_name}"
+                    "platform": "macOS"
                 },
                 "relationships": {
                     "license": {
-                        "data": {
-                            "type": "licenses",
-                            "id": license_id
-                        }
+                        "data": {"type": "licenses", "id": license_id}
                     }
                 }
             }
         }
         
-        try:
-            response = requests.post(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Headers: {response.headers}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 201:
             return response.json()
-        
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error creating machine: {e}")
-            return None
+        raise KeygenError(f"Failed to create machine: {response.text}")
 
     @staticmethod
     def is_fingerprint_registered(license_id, fingerprint):
@@ -483,9 +471,12 @@ def create_license():
             user_id=user_id,
             policy_id=policy_id,
             first_name=data['first_name'],
-            last_name=data['last_name'],
-            fingerprint=data['fingerprint']
+            last_name=data['last_name']
         )
+        
+        # Enregistrer la machine
+        license_id = license_result['data']['id']
+        KeygenAPI.create_machine(license_id, data['fingerprint'])
         
         # Envoyer email
         license_key = license_result['data']['attributes']['key']
@@ -512,7 +503,7 @@ def validate_license_route():
         
         if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
             try:  
-                KeygenAPI.create_machine(license_id, "", "", data['fingerprint'])
+                KeygenAPI.create_machine(license_id, data['fingerprint'])
             except KeygenError as e:
                 logger.error(f"Failed to register fingerprint: {str(e)}")
                 return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
