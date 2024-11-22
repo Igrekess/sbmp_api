@@ -249,13 +249,10 @@ class KeygenAPI:
         
         Args:
             license_id (str): ID de la licence
-            fingerprint (str): Empreinte de la machine
-            email (str): Email de l'utilisateur
-            
-        Returns:
-            dict: Résultat de la validation
+            fingerprint (str): Empreinte machine
+            email (str): Email utilisateur
         """
-        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/actions/validate"
+        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/{license_id}/actions/validate"
         
         headers = {
             "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
@@ -263,22 +260,30 @@ class KeygenAPI:
         }
         
         payload = {
-            "meta": {
-                "key": license_id,
-                "email": email,
-                "fingerprint": fingerprint
+            "data": {
+                "type": "validations",
+                "attributes": {
+                    "fingerprint": fingerprint,
+                    "metadata": {
+                        "email": email
+                    }
+                }
             }
         }
         
-        response = requests.post(url, json=payload, headers=headers)
-        
-        if response.status_code == 200:
-            return {"success": True}
-        else:
-            return {
-                "success": False, 
-                "error": response.json().get('errors', [{'detail': 'Validation failed'}])[0]['detail']
-            }
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response_data = response.json()
+            
+            if response.status_code == 200:
+                return {"success": True}
+            else:
+                error_msg = response_data.get('errors', [{'detail': 'Validation failed'}])[0]['detail']
+                return {"success": False, "error": error_msg}
+                
+        except Exception as e:
+            logger.error(f"License validation request failed: {str(e)}")
+            return {"success": False, "error": "Validation request failed"}
 
     @staticmethod
     def create_machine(license_id, fingerprint):
