@@ -345,6 +345,26 @@ class KeygenAPI:
         except KeygenError:
             return False
 
+    @staticmethod
+    def get_license_details(license_key):
+        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/{license_key}"
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        response = requests.get(url, headers=headers)
+        return response.json() if response.status_code == 200 else None
+
+    @staticmethod
+    def get_machines_for_license(license_key):
+        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/{license_key}/machines"
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        response = requests.get(url, headers=headers)
+        return response.json()['data'] if response.status_code == 200 else []
+
 def send_license_email(email, license_key, first_name, is_trial=True):
     if not validate_smtp_config():
         logger.warning("SMTP not configured correctly. Skipping email sending.")
@@ -490,41 +510,60 @@ def create_license():
         return jsonify({"success": False, "error": str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.route('/validate', methods=['POST'])
-@validate_json_payload('email', 'licenseKey', 'fingerprint')  
-def validate_license_route():
+@validate_json_payload('email', 'licenseKey', 'fingerprint')
+def validate_license():
     try:
         data = request.get_json()
         
-        validate_email(data['email'])
-        
-        license_id = KeygenAPI.get_license_id_by_key(data['licenseKey'])
-        if not license_id:
-            return jsonify({"success": False, "error": "Invalid license key"}), HTTPStatus.BAD_REQUEST
-        
-        if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
-            try:  
-                KeygenAPI.create_machine(license_id, data['fingerprint'])
-            except KeygenError as e:
-                logger.error(f"Failed to register fingerprint: {str(e)}")
-                return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
+        # Récupérer les détails de la licence
+        license_details = KeygenAPI.get_license_details(data['licenseKey'])
+        if not license_details:
+            return jsonify({
+                "success": False,
+                "error": "License not found"
+            }), HTTPStatus.NOT_FOUND
 
+        # Récupérer les machines associées
+        machines = KeygenAPI.get_machines_for_license(data['licenseKey'])
+        
+        # Déterminer le type de licence et le max de machines depuis la policy
+        policy_id = license_details['data']['relationships']['policy']['data']['id']
+        policy_mapping = {
+            Config.TRIAL_POLICY_ID: {'type': 'trial', 'max_machines': 1},
+            Config.STANDALONE_POLICY_ID: {'type': 'standalone', 'max_machines': 2},
+            Config.ENTERPRISE6_POLICY_ID: {'type': 'enterprise6', 'max_machines': 6},
+            Config.ENTERPRISE10_POLICY_ID: {'type': 'enterprise10', 'max_machines': 10},
+            Config.ENTERPRISE20_POLICY_ID: {'type': 'enterprise20', 'max_machines': 20}
+        }
+        
+        license_info = policy_mapping.get(policy_id, {'type': 'unknown', 'max_machines': 0})
+        machines_remaining = license_info['max_machines'] - len(machines)
+
+        # Valider la licence
         validation_result = KeygenAPI.validate_license(
-            data['email'], 
-            license_id,
-            data['fingerprint']
+            license_id=license_details['data']['id'],
+            fingerprint=data['fingerprint']
         )
-        
-        return jsonify({
-            "success": validation_result["success"],
-            "error": validation_result["error"] 
-        }), HTTPStatus.OK if validation_result["success"] else HTTPStatus.UNAUTHORIZED
 
-    except ValueError as e:
-        logger.warning(f"Invalid request data: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
+        if validation_result["success"]:
+            return jsonify({
+                "success": True,
+                "licenseType": license_info['type'],
+                "expiry": license_details['data']['attributes'].get('expiry'),
+                "machinesRemaining": machines_remaining
+            }), HTTPStatus.OK
+        else:
+            return jsonify({
+                "success": False,
+                "error": validation_result["error"]
+            }), HTTPStatus.UNAUTHORIZED
+
     except Exception as e:
-        logger.error(f"Unexpected error during validation: {str(e)}")
-        return jsonify({"success": False, "error": "An unexpected error occurred"}), HTTPStatus.INTERNAL_SERVER_ERROR
+        logger.error(f"License validation error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.errorhandler(HTTPStatus.NOT_FOUND) 
 def not_found_error(error):
