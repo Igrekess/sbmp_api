@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, url_for
 import requests
 import smtplib
 from email.mime.text import MIMEText
@@ -74,7 +74,17 @@ class KeygenAPI:
             user_id = user_data['data']['id']
             logger.info(f"User ID: {user_id}")
             
-            return user_data
+            # Créer une licence d'essai pour l'utilisateur
+            license_data = KeygenAPI.create_license(user_id, 'trial')
+            
+            # Créer un token d'activation pour l'utilisateur
+            activation_token = KeygenAPI.create_activation_token(user_id)
+            
+            return {
+                "user": user_data,
+                "license": license_data,
+                "activation_token": activation_token
+            }
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Error creating user: {e}")
@@ -82,13 +92,14 @@ class KeygenAPI:
 
     @staticmethod
     def create_license(user_id, license_type):
-        logger.info(f"Creating license for user {user_id}")
+        logger.info(f"Creating {license_type} license for user {user_id}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
         payload = {
             "data": {
                 "type": "licenses",
                 "attributes": {
-                    "name": f"License for {user_id}"
+                    "name": f"License for {user_id}",
+                    "expiry": "30d"  # Exemple pour une licence d'essai de 30 jours
                 },
                 "relationships": {
                     "policy": {
@@ -327,27 +338,22 @@ class KeygenAPI:
             raise ValueError(f"License validation failed: {str(e)}")
 
 def send_activation_email(email, token):
-    logger.info(f"Sending activation email to {email}")
-    try:
-        msg = MIMEText(f"""
-        Welcome! Please activate your account by clicking the following link:
-        {Config.FRONTEND_URL}/activate?token={token}
-        
-        This link will expire in 24 hours.
-        """)
-        
-        msg['Subject'] = 'Account Activation'
-        msg['From'] = Config.EMAIL_USER
-        msg['To'] = email
+    activation_link = url_for('activate_user', token=token, _external=True)
+    subject = "Activate your account"
+    body = f"Please click the following link to activate your account: {activation_link}"
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = Config.EMAIL_USER
+    msg['To'] = email
 
+    try:
         with smtplib.SMTP(Config.SMTP_SERVER, Config.SMTP_PORT) as server:
             server.starttls()
             server.login(Config.EMAIL_USER, Config.EMAIL_PASSWORD)
-            server.send_message(msg)
-            
+            server.sendmail(Config.EMAIL_USER, email, msg.as_string())
+            logger.info(f"Activation email sent to {email}")
     except Exception as e:
-        logger.error(f"Failed to send activation email: {str(e)}")
-        raise
+        logger.error(f"Failed to send activation email: {e}")
 
 def validate_json_payload(*required_fields):
     def decorator(f):
@@ -396,7 +402,28 @@ def validate_license():
         logger.error(f"Unexpected error during license validation: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
 
-# ... (continuation de la route /create)
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    email = data.get('email')
+    
+    result = KeygenAPI.create_user(first_name, last_name, email)
+    if result:
+        send_activation_email(email, result['activation_token'])
+        return jsonify({"message": "User created. Please check your email to activate your account."}), 201
+    else:
+        return jsonify({"message": "Failed to create user."}), 400
+
+@app.route('/activate/<token>', methods=['GET'])
+def activate_user(token):
+    result = KeygenAPI.validate_and_activate_user(token)
+    if result:
+        return jsonify({"message": "User activated successfully."}), 200
+    else:
+        return jsonify({"message": "Failed to activate user."}), 400
+
 @app.route('/create', methods=['POST'])
 @validate_json_payload('first_name', 'last_name', 'email', 'license_type')
 def create():
