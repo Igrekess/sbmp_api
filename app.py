@@ -22,6 +22,7 @@ class KeygenAPI:
     @staticmethod
     def get_policy_id(license_type):
         return Config.TRIAL_POLICY_ID if license_type.lower() == 'trial' else Config.STANDALONE_POLICY_ID
+
     @staticmethod
     def create_user(first_name, last_name, email):
         print("Creating user with:", {
@@ -60,30 +61,41 @@ class KeygenAPI:
 
     @staticmethod
     def create_license(user_id, license_type, name):
-        response = requests.post(
-            f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses",
-            json={
-                "data": {
-                    "type": "licenses",
-                    "attributes": {"name": name},
-                    "relationships": {
-                        "policy": {
-                            "data": {
-                                "type": "policies",
-                                "id": KeygenAPI.get_policy_id(license_type)
-                            }
-                        },
-                        "user": {
-                            "data": {"type": "users", "id": user_id}
+        policy_id = KeygenAPI.get_policy_id(license_type)
+        api_url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses"
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "data": {
+                "type": "licenses",
+                "attributes": {"name": name},
+                "relationships": {
+                    "policy": {
+                        "data": {
+                            "type": "policies",
+                            "id": policy_id
+                        }
+                    },
+                    "user": {
+                        "data": {
+                            "type": "users",
+                            "id": user_id
                         }
                     }
                 }
-            },
-            headers={
-                "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
-                "Content-Type": "application/json"
             }
-        )
+        }
+        
+        print("Sending request to:", api_url)
+        print("Headers:", headers)
+        print("Payload:", payload)
+        
+        response = requests.post(api_url, json=payload, headers=headers)
+        print("Response status:", response.status_code)
+        print("Response body:", response.text)
+        
         response.raise_for_status()
         return response.json()["data"]["id"]
 
@@ -321,6 +333,22 @@ def activate_user():
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/create-user-license', methods=['POST'])
+def create_user_and_license():
+    data = request.json
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    email = data.get('email')
+    license_type = data.get('license_type')
+    license_name = data.get('license_name')
+
+    try:
+        user_id = KeygenAPI.create_user(first_name, last_name, email)
+        license_id = KeygenAPI.create_license(user_id, license_type, license_name)
+        return jsonify({"user_id": user_id, "license_id": license_id}), 201
+    except requests.HTTPError as e:
+        return jsonify({"error": str(e)}), 400
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
