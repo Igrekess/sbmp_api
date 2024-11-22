@@ -245,13 +245,7 @@ class KeygenAPI:
 
     @staticmethod
     def validate_license(license_id, fingerprint, email):
-        """Valide une licence avec Keygen API
-        
-        Args:
-            license_id (str): ID de la licence
-            fingerprint (str): Empreinte machine
-            email (str): Email utilisateur
-        """
+        """Valide une licence avec Keygen API"""
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/{license_id}/actions/validate"
         
         headers = {
@@ -266,14 +260,6 @@ class KeygenAPI:
                     "fingerprint": fingerprint,
                     "metadata": {
                         "email": email
-                    }
-                },
-                "relationships": {
-                    "license": {
-                        "data": {
-                            "type": "licenses",
-                            "id": license_id
-                        }
                     }
                 }
             }
