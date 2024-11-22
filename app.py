@@ -70,8 +70,11 @@ class KeygenAPI:
             response.raise_for_status()
             user_data = response.json()
             
-            # Mettre à jour le statut de l'utilisateur en INACTIVE
+            # Récupérer l'UUID de l'utilisateur
             user_id = user_data['data']['id']
+            logger.info(f"User ID: {user_id}")
+            
+            # Mettre à jour le statut de l'utilisateur en INACTIVE
             KeygenAPI.update_user_status(user_id, 'INACTIVE')
             
             return user_data
@@ -209,17 +212,11 @@ class KeygenAPI:
             logger.debug(f"API Response Content: {response.text}")
             
             response.raise_for_status()
-            response_data = response.json()
-            
-            if not response_data.get("meta", {}).get("valid"):
-                raise ValueError("Invalid activation token")
-                
-            user_id = response_data["data"]["relationships"]["user"]["data"]["id"]
-            KeygenAPI.update_user_status(user_id, "ACTIVE")
-            return user_id
+            return response.json()
+        
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to validate token: {str(e)}")
-            raise ValueError(f"Failed to validate token: {str(e)}")
+            logger.error(f"Error validating and activating user: {e}")
+            return None
 
     @staticmethod
     def create_machine(license_id, fingerprint):
