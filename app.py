@@ -244,54 +244,40 @@ class KeygenAPI:
             return None
 
     @staticmethod
-    def validate_license(email, license_id, fingerprint):
-        try:
-            license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_id}/actions/validate"
-            logger.debug(f"Validating license ID {license_id} for email {email} and fingerprint {fingerprint}")
-            license_response = requests.post(
-                license_url,
-                headers=KeygenAPI.get_headers(),
-                json={
-                    "meta": {
-                        "scope": {
-                            "user": email,
-                            "fingerprint": fingerprint
-                        }
-                    }
-                }
-            )
-            license_data = KeygenAPI.handle_response(license_response)
-
-            result = {
-                "success": False,
-                "expiry": None,
-                "status": "INVALID",
-                "error": None
+    def validate_license(license_id, fingerprint, email):
+        """Valide une licence avec Keygen API
+        
+        Args:
+            license_id (str): ID de la licence
+            fingerprint (str): Empreinte de la machine
+            email (str): Email de l'utilisateur
+            
+        Returns:
+            dict: Résultat de la validation
+        """
+        url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/actions/validate"
+        
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "meta": {
+                "key": license_id,
+                "email": email,
+                "fingerprint": fingerprint
             }
-
-            if not license_data.get("meta", {}).get("valid"):
-                return result
-
-            # Récupérer les détails de la licence
-            license_attrs = license_data.get("data", {}).get("attributes", {})
-            expiry = license_attrs.get("expiry")
-            if not expiry:
-                expiry = "unlimited"
-            result.update({
-                "success": True,
-                "expiry": expiry,
-                "status": license_attrs.get("status", "ACTIVE")
-            })
-
-            return result
-
-        except KeygenError as e:
-            logger.error(f"License validation failed: {str(e)}")
+        }
+        
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            return {"success": True}
+        else:
             return {
-                "success": False,
-                "expiry": None,
-                "status": "ERROR",
-                "error": str(e)
+                "success": False, 
+                "error": response.json().get('errors', [{'detail': 'Validation failed'}])[0]['detail']
             }
 
     @staticmethod
@@ -542,7 +528,8 @@ def validate_license():
         # Valider la licence
         validation_result = KeygenAPI.validate_license(
             license_id=license_details['data']['id'],
-            fingerprint=data['fingerprint']
+            fingerprint=data['fingerprint'],
+            email=data['email']  # Ajout du paramètre email
         )
 
         if validation_result["success"]:
