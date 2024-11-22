@@ -8,7 +8,7 @@ import logging
 import logging.config
 import re
 
-# Configuration complète du logging
+# Configuration du logging
 LOGGING_CONFIG = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -32,17 +32,17 @@ LOGGING_CONFIG = {
             'level': 'DEBUG',
             'formatter': 'detailed',
             'filename': 'app.log',
-            'maxBytes': 10485760,  # 10MB
+            'maxBytes': 10485760,
             'backupCount': 5
         }
     },
     'loggers': {
-        '': {  # root logger
+        '': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
             'propagate': True
         },
-        'werkzeug': {  # Flask's logging
+        'werkzeug': {
             'handlers': ['console'],
             'level': 'ERROR',
             'propagate': False
@@ -70,21 +70,18 @@ class KeygenError(Exception):
     pass
 
 def validate_email(email):
-    """Valide le format de l'adresse email."""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     if not re.match(pattern, email):
         raise ValueError("Invalid email format")
     return True
 
 def validate_smtp_config():
-    """Valide la configuration SMTP au démarrage."""
     required_configs = ['SMTP_SERVER', 'SMTP_PORT', 'EMAIL_USER', 'EMAIL_PASSWORD']
     missing = [config for config in required_configs if not getattr(Config, config)]
     if missing:
         raise ValueError(f"Missing SMTP configuration: {', '.join(missing)}")
 
 def test_smtp_connection():
-    """Test la connexion SMTP."""
     try:
         with smtplib.SMTP(Config.SMTP_SERVER, Config.SMTP_PORT, timeout=5) as server:
             server.starttls()
@@ -107,7 +104,11 @@ class KeygenAPI:
 
     @staticmethod
     def handle_response(response):
-        """Gère les réponses de l'API Keygen de manière uniforme."""
+        if response.status_code == 422:
+            error_data = response.json()
+            error_message = error_data.get('errors', [{}])[0].get('detail', 'Validation error')
+            raise KeygenError(f"Validation error: {error_message}")
+            
         try:
             response.raise_for_status()
             return response.json()
@@ -124,10 +125,29 @@ class KeygenAPI:
 
     @staticmethod
     def get_policy_id(license_type):
-        """Retourne l'ID de la politique en fonction du type de licence."""
         if license_type.lower() not in ['trial', 'standalone']:
             raise ValueError("Invalid license type. Must be 'trial' or 'standalone'")
         return Config.TRIAL_POLICY_ID if license_type.lower() == 'trial' else Config.STANDALONE_POLICY_ID
+
+    @staticmethod
+    def get_user_by_email(email):
+        """Récupère un utilisateur par son email."""
+        logger.info(f"Looking up user with email: {email}")
+        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users"
+        params = {'email': email}
+        
+        response = requests.get(
+            url=url,
+            params=params,
+            headers=KeygenAPI.get_headers()
+        )
+        
+        try:
+            response_data = KeygenAPI.handle_response(response)
+            users = response_data.get('data', [])
+            return users[0] if users else None
+        except KeygenError:
+            return None
 
     @staticmethod
     def create_user(first_name, last_name, email):
@@ -196,8 +216,27 @@ class KeygenAPI:
         
         return KeygenAPI.handle_response(response)
 
+    @staticmethod
+    def get_user_licenses(user_id):
+        """Récupère toutes les licences d'un utilisateur."""
+        logger.info(f"Getting licenses for user: {user_id}")
+        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
+        params = {'user': user_id}
+        
+        response = requests.get(
+            url=url,
+            params=params,
+            headers=KeygenAPI.get_headers()
+        )
+        
+        try:
+            response_data = KeygenAPI.handle_response(response)
+            return response_data.get('data', [])
+        except KeygenError:
+            logger.error(f"Failed to get licenses for user {user_id}")
+            return []
+
 def send_license_email(email, license_key, is_trial=True):
-    """Envoie l'email avec la clé de licence."""
     try:
         validate_smtp_config()
         
@@ -208,8 +247,6 @@ def send_license_email(email, license_key, is_trial=True):
         Your license key is: {license_key}
         
         {"This license is valid for 30 days." if is_trial else "This is a permanent license."}
-        
-        Thank you for using our service!
         """
         
         msg = MIMEText(body)
@@ -224,23 +261,24 @@ def send_license_email(email, license_key, is_trial=True):
             server.login(Config.EMAIL_USER, Config.EMAIL_PASSWORD)
             server.sendmail(Config.EMAIL_USER, email, msg.as_string())
             logger.info(f"License email sent to {email}")
+            return True
     except Exception as e:
         logger.error(f"Failed to send license email: {str(e)}")
-        raise
+        return False
 
 def validate_json_payload(*required_fields):
-    """Décorateur pour valider les payloads JSON."""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if not request.is_json:
-                return jsonify({"error": "Content-Type must be application/json"}), 415
+                return jsonify({"success": False, "error": "Content-Type must be application/json"}), 415
             
             data = request.get_json()
             missing_fields = [field for field in required_fields if field not in data]
             
             if missing_fields:
                 return jsonify({
+                    "success": False,
                     "error": "Missing required fields",
                     "fields": missing_fields
                 }), 400
@@ -252,68 +290,94 @@ def validate_json_payload(*required_fields):
 @app.route('/register', methods=['POST'])
 @validate_json_payload('first_name', 'last_name', 'email')
 def register():
-    """Point d'entrée pour l'inscription d'un nouvel utilisateur."""
     try:
         data = request.get_json()
         
         # Validation des données
         validate_email(data['email'])
         if not all([data['first_name'].strip(), data['last_name'].strip()]):
-            raise ValueError("First name and last name cannot be empty")
+            return jsonify({
+                "success": False,
+                "error": "First name and last name cannot be empty"
+            }), 400
 
-        # Test SMTP avant de créer l'utilisateur
-        if not test_smtp_connection():
-            raise ValueError("SMTP configuration error. Please contact support.")
+        # Vérifier si l'utilisateur existe
+        existing_user = KeygenAPI.get_user_by_email(data['email'])
+        
+        if existing_user:
+            user_id = existing_user['id']
+            # Vérifier les licences existantes
+            existing_licenses = KeygenAPI.get_user_licenses(user_id)
+            active_license = next((lic for lic in existing_licenses if lic['attributes']['status'] == 'active'), None)
+            
+            if active_license:
+                return jsonify({
+                    "success": True,
+                    "message": "Existing license found",
+                    "licenseKey": active_license['attributes']['key']
+                }), 200
+        else:
+            # Créer nouvel utilisateur
+            user_result = KeygenAPI.create_user(
+                data['first_name'],
+                data['last_name'],
+                data['email']
+            )
+            user_id = user_result['data']['id']
 
-        # Création de l'utilisateur
-        user_result = KeygenAPI.create_user(
-            data['first_name'],
-            data['last_name'],
-            data['email']
-        )
-        user_id = user_result['data']['id']
-
-        # Création de la licence trial
+        # Créer nouvelle licence
         license_result = KeygenAPI.create_license(user_id, 'trial')
         license_key = license_result['data']['attributes']['key']
 
-        try:
-            # Envoi de l'email
-            send_license_email(data['email'], license_key, is_trial=True)
-        except Exception as email_error:
-            logger.warning(f"User created but email failed: {str(email_error)}")
-            return jsonify({
-                "message": "User registered successfully but email delivery failed. Please contact support.",
-                "userId": user_id,
-                "licenseKey": license_key
-            }), 201
-        
+        # Envoyer email
+        email_sent = send_license_email(data['email'], license_key, is_trial=True)
+
         return jsonify({
-            "message": "User registered successfully. Please check your email for your license key.",
-            "userId": user_id,
-            "licenseKey": license_key
+            "success": True,
+            "licenseKey": license_key,
+            "emailSent": email_sent
         }), 201
-        
+
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
     except KeygenError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
     except Exception as e:
-        logger.error(f"Unexpected error during registration: {str(e)}")
-        return jsonify({"error": "An unexpected error occurred"}), 500
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "An unexpected error occurred"
+        }), 500
+
+@app.errorhandler(404)
+def not_found_error(error):
+    return jsonify({
+        "success": False,
+        "error": "Resource not found"
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 Error: {str(error)}")
+    return jsonify({
+        "success": False,
+        "error": "Internal server error"
+    }), 500
 
 @app.before_request
 def log_request_info():
-    """Log les informations détaillées de la requête."""
     logger.debug('Request Method: %s', request.method)
     logger.debug('Request URL: %s', request.url)
     logger.debug('Request Path: %s', request.path)
-    logger.debug('Remote Address: %s', request.remote_addr)
-    
     logger.debug('Headers:')
     for header, value in request.headers.items():
         logger.debug('    %s: %s', header, value)
-    
     if request.get_data():
         try:
             if request.is_json:
@@ -325,45 +389,12 @@ def log_request_info():
 
 @app.after_request
 def log_response_info(response):
-    """Log les informations détaillées de la réponse."""
     logger.debug('Response Status: %s', response.status)
     logger.debug('Response Headers:')
     for header, value in response.headers.items():
         logger.debug('    %s: %s', header, value)
-    
-    content_type = response.headers.get('Content-Type', '')
-    if 'application/json' in content_type:
-        try:
-            logger.debug('Response Body: %s', response.get_data().decode('utf-8'))
-        except Exception as e:
-            logger.warning('Could not decode response body: %s', str(e))
-    
     return response
 
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({"error": "Resource not found"}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.error(f"500 Error: {str(error)}")
-    return jsonify({"error": "Internal server error"}), 500
-
-@app.errorhandler(Exception)
-def handle_exception(error):
-    """Log les exceptions non gérées."""
-    logger.error('Unhandled Exception: %s', str(error), exc_info=True)
-    return jsonify({
-        "error": "An unexpected error occurred",
-        "message": str(error)
-    }), 500
-
 if __name__ == '__main__':
-    # Test SMTP au démarrage
-    if test_smtp_connection():
-        logger.info("SMTP connection test successful")
-    else:
-        logger.error("SMTP connection test failed")
-    
     logger.info("Starting Flask application")
     app.run(host='0.0.0.0', port=5000)
