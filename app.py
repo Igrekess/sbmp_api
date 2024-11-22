@@ -173,20 +173,16 @@ class KeygenAPI:
         return KeygenAPI.handle_response(response)
 
     @staticmethod
-    def create_license(user_id, license_type):
+    def create_license(user_id, first_name, last_name, license_type):
+        logger.info(f"Creating {license_type} license for user {first_name} {last_name}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
-        
-        license_attrs = {
-            "name": f"License for {user_id}"
-        }
-        
-        if license_type.lower() == 'trial':
-            license_attrs["expiry"] = "30d"
-        
         payload = {
             "data": {
                 "type": "licenses",
-                "attributes": license_attrs,
+                "attributes": {
+                    "name": f"License for {first_name} {last_name}",
+                    "expiry": "30d"  # Exemple pour une licence d'essai de 30 jours
+                },
                 "relationships": {
                     "policy": {
                         "data": {
@@ -204,13 +200,23 @@ class KeygenAPI:
             }
         }
         
-        response = requests.post(
-            url=url,
-            json=payload,
-            headers=KeygenAPI.get_headers()
-        )
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=KeygenAPI.get_headers()
+            )
+            
+            logger.debug(f"API Response Status: {response.status_code}")
+            logger.debug(f"API Response Headers: {response.headers}")
+            logger.debug(f"API Response Content: {response.text}")
+            
+            response.raise_for_status()
+            return response.json()
         
-        return KeygenAPI.handle_response(response)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error creating license: {e}")
+            return None
 
     @staticmethod
     def get_license_id_by_key(license_key):
@@ -300,13 +306,15 @@ class KeygenAPI:
             }
 
     @staticmethod
-    def create_machine(license_id, fingerprint):
+    def create_machine(license_id, first_name, last_name, fingerprint):
+        logger.info(f"Creating machine for user {first_name} {last_name}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/machines"
         payload = {
             "data": {
                 "type": "machines",
                 "attributes": {
-                    "fingerprint": fingerprint
+                    "fingerprint": fingerprint,
+                    "name": f"Machine for {first_name} {last_name}"
                 },
                 "relationships": {
                     "license": {
@@ -319,13 +327,23 @@ class KeygenAPI:
             }
         }
         
-        response = requests.post(
-            url=url,
-            json=payload,
-            headers=KeygenAPI.get_headers()
-        )
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=KeygenAPI.get_headers()
+            )
+            
+            logger.debug(f"API Response Status: {response.status_code}")
+            logger.debug(f"API Response Headers: {response.headers}")
+            logger.debug(f"API Response Content: {response.text}")
+            
+            response.raise_for_status()
+            return response.json()
         
-        return KeygenAPI.handle_response(response)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error creating machine: {e}")
+            return None
 
     @staticmethod
     def is_fingerprint_registered(license_id, fingerprint):
@@ -438,7 +456,7 @@ def register():
 
         existing_user = KeygenAPI.get_user_by_email(data['email'])
         
-        if (existing_user):
+        if existing_user:
             user_id = existing_user['id']
             existing_licenses = KeygenAPI.get_user_licenses(user_id)
             active_license = next((lic for lic in existing_licenses if lic['attributes']['status'] == 'ACTIVE'), None)
@@ -460,7 +478,7 @@ def register():
 
         # Création de la licence
         try:
-            license_result = KeygenAPI.create_license(user_id, 'trial')
+            license_result = KeygenAPI.create_license(user_id, data['first_name'], data['last_name'], 'trial')
             license_key = license_result['data']['attributes']['key']
         except KeygenError:
             return jsonify({"success": False}), 400
@@ -478,7 +496,6 @@ def register():
         return jsonify({"success": False}), 400
     except Exception:
         return jsonify({"success": False}), 500
-
 
 @app.route('/validate', methods=['POST'])
 @validate_json_payload('email', 'licenseKey', 'fingerprint')
@@ -509,7 +526,7 @@ def validate_license():
             # Si la validation échoue, vérifier si le fingerprint doit être enregistré
             if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
                 try:
-                    KeygenAPI.create_machine(license_id, data['fingerprint'])
+                    KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
                     # Réessayer la validation après l'enregistrement du fingerprint
                     validation_result = KeygenAPI.validate_license(
                         data['email'],
