@@ -248,9 +248,9 @@ class KeygenAPI:
         """Valide une licence avec la clé via Keygen API
         
         Args:
-            license_key (str): Clé de licence
+            license_key (str): Clé de licence à valider
             fingerprint (str): Empreinte machine
-            email (str): Email utilisateur
+            email (str): Email de l'utilisateur
         """
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/actions/validate-key"
         
@@ -523,49 +523,13 @@ def validate_license():
     try:
         data = request.get_json()
         
-        # Récupérer les détails de la licence
-        license_details = KeygenAPI.get_license_details(data['licenseKey'])
-        if not license_details:
-            return jsonify({
-                "success": False,
-                "error": "License not found"
-            }), HTTPStatus.NOT_FOUND
-
-        # Récupérer les machines associées
-        machines = KeygenAPI.get_machines_for_license(data['licenseKey'])
-        
-        # Déterminer le type de licence et le max de machines depuis la policy
-        policy_id = license_details['data']['relationships']['policy']['data']['id']
-        policy_mapping = {
-            Config.TRIAL_POLICY_ID: {'type': 'trial', 'max_machines': 1},
-            Config.STANDALONE_POLICY_ID: {'type': 'standalone', 'max_machines': 2},
-            Config.ENTERPRISE6_POLICY_ID: {'type': 'enterprise6', 'max_machines': 6},
-            Config.ENTERPRISE10_POLICY_ID: {'type': 'enterprise10', 'max_machines': 10},
-            Config.ENTERPRISE20_POLICY_ID: {'type': 'enterprise20', 'max_machines': 20}
-        }
-        
-        license_info = policy_mapping.get(policy_id, {'type': 'unknown', 'max_machines': 0})
-        machines_remaining = license_info['max_machines'] - len(machines)
-
-        # Valider la licence
         validation_result = KeygenAPI.validate_license(
-            license_id=license_details['data']['id'],
+            license_key=data['licenseKey'],
             fingerprint=data['fingerprint'],
-            email=data['email']  # Ajout du paramètre email
+            email=data['email']
         )
-
-        if validation_result["success"]:
-            return jsonify({
-                "success": True,
-                "licenseType": license_info['type'],
-                "expiry": license_details['data']['attributes'].get('expiry'),
-                "machinesRemaining": machines_remaining
-            }), HTTPStatus.OK
-        else:
-            return jsonify({
-                "success": False,
-                "error": validation_result["error"]
-            }), HTTPStatus.UNAUTHORIZED
+        
+        return jsonify(validation_result), HTTPStatus.OK if validation_result["success"] else HTTPStatus.UNAUTHORIZED
 
     except Exception as e:
         logger.error(f"License validation error: {str(e)}")
