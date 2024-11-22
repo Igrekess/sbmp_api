@@ -234,10 +234,13 @@ class KeygenAPI:
             
             for license in licenses:
                 if license.get('attributes', {}).get('key') == license_key:
+                    logger.debug(f"License ID for key {license_key}: {license['id']}")
                     return license['id']
+            logger.error(f"No license found for key {license_key}")
             return None
             
-        except KeygenError:
+        except KeygenError as e:
+            logger.error(f"Error getting license ID for key {license_key}: {str(e)}")
             return None
 
     @staticmethod
@@ -261,6 +264,7 @@ class KeygenAPI:
     def validate_license(email, license_id, fingerprint):
         try:
             license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_id}/actions/validate"
+            logger.debug(f"Validating license ID {license_id} for email {email} and fingerprint {fingerprint}")
             license_response = requests.post(
                 license_url,
                 headers=KeygenAPI.get_headers(),
@@ -307,7 +311,7 @@ class KeygenAPI:
 
     @staticmethod
     def create_machine(license_id, first_name, last_name, fingerprint):
-        logger.info(f"Creating machine for user {first_name} {last_name}")
+        logger.info(f"Creating machine for user {first_name} {last_name} with license ID {license_id}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/machines"
         payload = {
             "data": {
@@ -551,7 +555,8 @@ def validate_license():
             "maxMachines": None,
             "status": "ERROR"
         }), 400
-    except Exception:
+    except Exception as e:
+        logger.error(f"Unexpected error during validation: {str(e)}")
         return jsonify({
             "success": False,
             "expiry": None,
