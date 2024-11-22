@@ -457,71 +457,54 @@ def validate_json_payload(*required_fields):
     return decorator
 
 @app.route('/create', methods=['POST'])
-@validate_json_payload('first_name', 'last_name', 'email', 'license_type', 'fingerprint')
+@validate_json_payload('first_name', 'last_name', 'email')
 def create_license():
     try:
         data = request.get_json()
         
-        validate_email(data['email'])
+        # Ajout d'un type de licence par défaut pour les essais
+        data['license_type'] = data.get('license_type', 'trial')
+        data['fingerprint'] = data.get('fingerprint', '')
+        
+        # Validation
+        try:
+            validate_email(data['email'])
+        except ValueError:
+            return jsonify({"success": False, "error": "Invalid email format"}), HTTPStatus.BAD_REQUEST
+            
         if not all([data['first_name'].strip(), data['last_name'].strip()]):
             return jsonify({"success": False, "error": "Invalid name"}), HTTPStatus.BAD_REQUEST
 
+        # Vérifier utilisateur existant
         existing_user = KeygenAPI.get_user_by_email(data['email'])
         
+        if existing_user and data['license_type'] == 'trial':
+            return jsonify({"success": False, "error": "User already has a trial license"}), HTTPStatus.CONFLICT
+
+        # Créer/obtenir utilisateur
         if existing_user:
             user_id = existing_user['id']
         else:
-            try:
-                user_result = KeygenAPI.create_user(
-                    data['first_name'],
-                    data['last_name'],
-                    data['email']
-                )
-                user_id = user_result['data']['id']
-            except KeygenError as e:
-                return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
+            user_result = KeygenAPI.create_user(
+                data['first_name'],
+                data['last_name'],
+                data['email']
+            )
+            user_id = user_result['data']['id']
 
-        try:
-            license_result = KeygenAPI.create_license(user_id, data['first_name'], data['last_name'], data['license_type'])
-            license_key = license_result['data']['attributes']['key']
-            license_id = license_result['data']['id']
-            expiry = license_result['data']['attributes']['expiry'] 
-        except KeygenError as e:
-            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
-        except ValueError as e:
-            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
-
-        try:
-            KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
-        except KeygenError as e:
-            logger.error(f"Failed to register fingerprint: {str(e)}")
-            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
-
-        is_trial = data['license_type'].lower() == 'trial'  
-        email_sent = send_license_email(
-            data['email'], 
-            license_key, 
-            data['first_name'],
-            is_trial=is_trial
-        )
-
-        if is_trial:
-            expiry_msg = expiry  
+        # Créer la licence
+        policy_id = Config.TRIAL_POLICY_ID if data['license_type'] == 'trial' else get_policy_id(data['license_type'])
+        license_result = KeygenAPI.create_license(user_id, policy_id)
+        
+        # Envoyer email
+        if send_license_email(data['email'], license_result['data']['attributes']['key'], data['license_type']):
+            return jsonify({"success": True}), HTTPStatus.CREATED
         else:
-            expiry_msg = "unlimited"
+            return jsonify({"success": False, "error": "Failed to send email"}), HTTPStatus.INTERNAL_SERVER_ERROR
 
-        return jsonify({
-            "success": email_sent,
-            "expiry": expiry_msg,
-            "error": "Failed to send email" if not email_sent else None
-        }), HTTPStatus.CREATED if email_sent else HTTPStatus.INTERNAL_SERVER_ERROR
-
-    except ValueError as e:
-        logger.warning(f"Invalid request data: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
     except Exception as e:
-        logger.error(f"Unexpected error during license creation: {str(e)}")
-        return jsonify({"success": False, "error": "An unexpected error occurred"}), HTTPStatus.INTERNAL_SERVER_ERROR
+        logger.error(f"License creation error: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.route('/validate', methods=['POST'])
 @validate_json_payload('email', 'licenseKey', 'fingerprint')  
