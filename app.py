@@ -236,13 +236,13 @@ class KeygenAPI:
             logger.error(f"Failed to get licenses for user {user_id}")
             return []
 
-def send_license_email(email, license_key, is_trial=True):
+def send_license_email(email, first_name, license_key, is_trial=True):
     try:
         validate_smtp_config()
         
         subject = "Welcome to StoryboardMaker Pro - Your License Key"
         body = f"""
-Dear StoryboardMaker Pro User,
+Dear {first_name},
 
 Thank you for choosing StoryboardMaker Pro! I'm excited to have you join our community of creative professionals.
 
@@ -359,7 +359,7 @@ def register():
         license_key = license_result['data']['attributes']['key']
 
         # Envoyer email
-        email_sent = send_license_email(data['email'], license_key, is_trial=True)
+        email_sent = send_license_email(data['email'], data['first_name'], license_key, is_trial=True)
 
         return jsonify({
             "success": True,
