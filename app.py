@@ -7,6 +7,7 @@ from functools import wraps
 import logging
 import logging.config
 import re
+from http import HTTPStatus
 
 LOGGING_CONFIG = {
     'version': 1,
@@ -38,12 +39,12 @@ LOGGING_CONFIG = {
     'loggers': {
         '': {
             'handlers': ['console', 'file'],
-            'level': 'DEBUG',
+            'level': 'WARNING',
             'propagate': True
         },
         'werkzeug': {
             'handlers': ['console'],
-            'level': 'ERROR',
+            'level': 'WARNING',
             'propagate': False
         }
     }
@@ -77,9 +78,14 @@ def validate_smtp_config():
     required_configs = ['SMTP_SERVER', 'SMTP_PORT', 'EMAIL_USER', 'EMAIL_PASSWORD']
     missing = [config for config in required_configs if not getattr(Config, config)]
     if missing:
-        raise ValueError(f"Missing SMTP configuration: {', '.join(missing)}")
+        logger.warning(f"Missing SMTP configuration: {', '.join(missing)}. Email sending will be disabled.")
+        return False
+    return True
 
 def test_smtp_connection():
+    if not validate_smtp_config():
+        return False
+    
     try:
         with smtplib.SMTP(Config.SMTP_SERVER, Config.SMTP_PORT, timeout=5) as server:
             server.starttls()
@@ -372,9 +378,11 @@ class KeygenAPI:
             return False
 
 def send_license_email(email, license_key, first_name, is_trial=True):
-    try:
-        validate_smtp_config()
-        
+    if not validate_smtp_config():
+        logger.warning("SMTP not configured correctly. Skipping email sending.")
+        return False
+    
+    try:        
         subject = "Welcome to StoryboardMaker Pro - Your License Key"
         body = f"""
 Dear {first_name},
@@ -386,8 +394,6 @@ Here's your license key to get started:
     {license_key}
 
 {'Your trial license is valid for 30 days, giving you full access to explore all premium features.' if is_trial else 'Your license has been activated with full access to all premium features.'}
-
-Your trial license is valid for 30 days, giving you full access to explore all the premium features.
 
 Getting Started:
 
@@ -436,13 +442,13 @@ def validate_json_payload(*required_fields):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if not request.is_json:
-                return jsonify({"success": False}), 415
+                return jsonify({"success": False}), HTTPStatus.UNSUPPORTED_MEDIA_TYPE
             
             data = request.get_json()
             missing_fields = [field for field in required_fields if field not in data]
             
             if missing_fields:
-                return jsonify({"success": False}), 400
+                return jsonify({"success": False, "missing_fields": missing_fields}), HTTPStatus.BAD_REQUEST
                 
             return f(*args, **kwargs)
         return decorated_function
@@ -456,7 +462,7 @@ def register():
         
         validate_email(data['email'])
         if not all([data['first_name'].strip(), data['last_name'].strip()]):
-            return jsonify({"success": False}), 400
+            return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
 
         existing_user = KeygenAPI.get_user_by_email(data['email'])
         
@@ -466,10 +472,8 @@ def register():
             active_license = next((lic for lic in existing_licenses if lic['attributes']['status'] == 'ACTIVE'), None)
             
             if active_license:
-                return jsonify({"success": True}), 200
-            # Si l'utilisateur existe mais n'a pas de licence active, on continue avec cet utilisateur
+                return jsonify({"success": True}), HTTPStatus.OK
         else:
-            # Création d'un nouvel utilisateur
             try:
                 user_result = KeygenAPI.create_user(
                     data['first_name'],
@@ -478,21 +482,20 @@ def register():
                 )
                 user_id = user_result['data']['id']
             except KeygenError:
-                return jsonify({"success": False}), 400
+                return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
 
-        # Création de la licence
         try:
             license_result = KeygenAPI.create_license(user_id, data['first_name'], data['last_name'], 'trial')
             license_key = license_result['data']['attributes']['key']
             license_id = license_result['data']['id']
         except KeygenError:
-            return jsonify({"success": False}), 400
+            return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
 
-        # Enregistrement du fingerprint
         try:
             KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
-        except KeygenError:
-            return jsonify({"success": False}), 400
+        except KeygenError as e:
+            logger.error(f"Failed to register fingerprint: {str(e)}")
+            return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
 
         email_sent = send_license_email(
             data['email'], 
@@ -501,12 +504,14 @@ def register():
             is_trial=True
         )
 
-        return jsonify({"success": email_sent}), 201 if email_sent else 500
+        return jsonify({"success": email_sent}), HTTPStatus.CREATED if email_sent else HTTPStatus.INTERNAL_SERVER_ERROR
 
-    except ValueError:
-        return jsonify({"success": False}), 400
-    except Exception:
-        return jsonify({"success": False}), 500
+    except ValueError as e:
+        logger.warning(f"Invalid request data: {str(e)}")
+        return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
+    except Exception as e:
+        logger.error(f"Unexpected error during registration: {str(e)}")
+        return jsonify({"success": False}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.route('/validate', methods=['POST'])
 @validate_json_payload('email', 'licenseKey', 'fingerprint', 'first_name', 'last_name')
@@ -516,7 +521,6 @@ def validate_license():
         
         validate_email(data['email'])
         
-        # Récupérer l'ID de la licence à partir de la licenseKey
         license_id = KeygenAPI.get_license_id_by_key(data['licenseKey'])
         if not license_id:
             return jsonify({
@@ -524,9 +528,8 @@ def validate_license():
                 "expiry": None,
                 "maxMachines": None,
                 "status": "INVALID"
-            }), 400
+            }), HTTPStatus.BAD_REQUEST
         
-        # Vérifier si le fingerprint est déjà enregistré
         if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
             try:
                 KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
@@ -537,24 +540,24 @@ def validate_license():
                     "expiry": None,
                     "maxMachines": None,
                     "status": "ERROR"
-                }), 400
+                }), HTTPStatus.BAD_REQUEST
 
-        # Validation de la licence
         validation_result = KeygenAPI.validate_license(
             data['email'],
             license_id,
             data['fingerprint']
         )
 
-        return jsonify(validation_result), 200 if validation_result["success"] else 401
+        return jsonify(validation_result), HTTPStatus.OK if validation_result["success"] else HTTPStatus.UNAUTHORIZED
 
-    except ValueError:
+    except ValueError as e:
+        logger.warning(f"Invalid request data: {str(e)}")
         return jsonify({
             "success": False,
             "expiry": None,
             "maxMachines": None,
             "status": "ERROR"
-        }), 400
+        }), HTTPStatus.BAD_REQUEST
     except Exception as e:
         logger.error(f"Unexpected error during validation: {str(e)}")
         return jsonify({
@@ -562,15 +565,15 @@ def validate_license():
             "expiry": None,
             "maxMachines": None,
             "status": "ERROR"
-        }), 500
+        }), HTTPStatus.INTERNAL_SERVER_ERROR
 
-@app.errorhandler(404)
+@app.errorhandler(HTTPStatus.NOT_FOUND)
 def not_found_error(error):
-    return jsonify({"success": False}), 404
+    return jsonify({"success": False, "error": str(error)}), HTTPStatus.NOT_FOUND
 
-@app.errorhandler(500)
+@app.errorhandler(HTTPStatus.INTERNAL_SERVER_ERROR)
 def internal_error(error):
-    return jsonify({"success": False}), 500
+    return jsonify({"success": False, "error": str(error)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.before_request
 def log_request_info():
@@ -594,6 +597,6 @@ if __name__ == '__main__':
     if test_smtp_connection():
         logger.info("SMTP connection test successful")
     else:
-        logger.error("SMTP connection test failed")
+        logger.warning("SMTP connection test failed. Email sending will be disabled.")
     
     app.run(host='0.0.0.0', port=5000)
