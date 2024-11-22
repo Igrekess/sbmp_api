@@ -212,7 +212,7 @@ class KeygenAPI:
         
         return KeygenAPI.handle_response(response)
 
-@staticmethod
+    @staticmethod
     def get_user_licenses(user_id):
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
         params = {'user': user_id}
@@ -332,9 +332,9 @@ Here's your license key to get started:
 {'Your trial license is valid for 30 days, giving you full access to explore all premium features.' if is_trial else 'Your license has been activated with full access to all premium features.'}
 
 Getting Started:
-1. Launch Capture One
-2. Launch StoryBoard Maker Pro Create or Setup
-3. Enter your mail and copy and paste your license key
+1. Launch StoryboardMaker Pro
+2. Click on 'Enter License' in the settings menu
+3. Copy and paste your license key
 4. Start creating amazing storyboards!
 
 Key Features You Can Now Access:
@@ -407,10 +407,9 @@ def register():
             
             if active_license:
                 return jsonify({"success": True}), 200
-        
-        if existing_user:
-            user_id = existing_user['id']
+            # Si l'utilisateur existe mais n'a pas de licence active, on continue avec cet utilisateur
         else:
+            # Création d'un nouvel utilisateur
             try:
                 user_result = KeygenAPI.create_user(
                     data['first_name'],
@@ -421,6 +420,7 @@ def register():
             except KeygenError:
                 return jsonify({"success": False}), 400
 
+        # Création de la licence
         try:
             license_result = KeygenAPI.create_license(user_id, 'trial')
             license_key = license_result['data']['attributes']['key']
@@ -434,15 +434,13 @@ def register():
             is_trial=True
         )
 
-        if email_sent:
-            return jsonify({"success": True}), 201
-        else:
-            return jsonify({"success": False}), 500
+        return jsonify({"success": email_sent}), 201 if email_sent else 500
 
     except ValueError:
         return jsonify({"success": False}), 400
     except Exception:
         return jsonify({"success": False}), 500
+
 
 @app.route('/validate', methods=['POST'])
 @validate_json_payload('email', 'licenseKey', 'fingerprint')
@@ -457,7 +455,6 @@ def validate_license():
             data['licenseKey'],
             data['fingerprint']
         )
-        
         return jsonify({"success": is_valid}), 200 if is_valid else 401
 
     except ValueError:
