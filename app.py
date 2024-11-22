@@ -156,27 +156,28 @@ class KeygenAPI:
             "data": {
                 "type": "tokens",
                 "attributes": {
-                    "expiry": "24h"
-                },
-                "relationships": {
-                    "user": {
-                        "data": {
-                            "type": "users",
-                            "id": user_id
-                        }
-                    }
+                    "expiry": "24h",
+                    "user": user_id  # Déplacer l'ID de l'utilisateur dans les attributs
                 }
             }
         }
         
-        response = requests.post(
-            url=url,
-            json=payload,
-            headers=KeygenAPI.get_headers()
-        )
-        
-        result = KeygenAPI.handle_response(response)
-        return result["data"]["attributes"]["token"]
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=KeygenAPI.get_headers()
+            )
+            
+            logger.debug(f"API Response Status: {response.status_code}")
+            logger.debug(f"API Response Content: {response.text}")
+            
+            response.raise_for_status()
+            result = response.json()
+            return result["data"]["attributes"]["token"]
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to create activation token: {str(e)}")
+            raise ValueError(f"Failed to create activation token: {str(e)}")
 
     @staticmethod
     def validate_and_activate_user(token):
