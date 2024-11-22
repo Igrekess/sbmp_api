@@ -254,8 +254,8 @@ Here's your license key to get started:
 
 Getting Started:
 1. Launch StoryboardMaker Pro
-2. Click on 'Enter License' in the settings menu
-3. Copy and paste your license key
+2. Launch StoryBoard Maker Pro Create or Settings
+3. Copy and paste your license key and indicate your email address
 4. Start creating amazing storyboards!
 
 Key Features You Can Now Access:
@@ -266,12 +266,14 @@ Key Features You Can Now Access:
 • And much more!
 
 Need Help?
-If you have any questions or need assistance, don't hesitate to contact our support team at storyboardmakerpro@dityan.com
+If you have any questions or need assistance, don't hesitate to contact me at storyboardmakerpro@dityan.com.
+I will do my best to help you get the most out of StoryboardMaker Pro.
 
-{'Make the most of your 30-day trial! We hope StoryboardMaker Pro helps bring your visual stories to life.' if is_trial else 'We hope StoryboardMaker Pro helps bring your visual stories to life.'}
+{'Make the most of your 30-day trial! We hope StoryboardMaker Pro helps you to optimise your workflow.' if is_trial else 'We hope StoryboardMaker Pro helps bring your visual stories to life.'}
 
 Best regards,
 The StoryboardMaker Pro Creator
+Yan Senez
 
 Note: Please keep this email for your records. Your license key may be needed for future reinstallations.
         """
