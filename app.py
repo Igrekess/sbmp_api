@@ -51,8 +51,7 @@ class KeygenAPI:
                 "attributes": {
                     "first-name": first_name,
                     "last-name": last_name,
-                    "email": email,
-                    "status": "INACTIVE"
+                    "email": email
                 }
             }
         }
@@ -69,17 +68,15 @@ class KeygenAPI:
             logger.debug(f"API Response Content: {response.text}")
             
             response.raise_for_status()
-            return response.json()["data"]["id"]
+            return response.json()
+        
         except requests.exceptions.RequestException as e:
-            logger.error(f"API request failed: {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response content: {e.response.text}")
-            raise ValueError(f"Failed to create user: {str(e)}")
+            logger.error(f"Error creating user: {e}")
+            return None
 
     @staticmethod
     def update_user_status(user_id, status):
-        logger.info(f"Updating user {user_id} status to {status}")
+        logger.info(f"Updating status for user {user_id} to {status}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
         payload = {
             "data": {
@@ -99,13 +96,15 @@ class KeygenAPI:
             )
             
             logger.debug(f"API Response Status: {response.status_code}")
+            logger.debug(f"API Response Headers: {response.headers}")
             logger.debug(f"API Response Content: {response.text}")
             
             response.raise_for_status()
-            return response.json()["data"]["id"]
+            return response.json()
+        
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to update user status: {str(e)}")
-            raise ValueError(f"Failed to update user status: {str(e)}")
+            logger.error(f"Error updating user status: {e}")
+            return None
 
     @staticmethod
     def create_license(user_id, license_type, name):
