@@ -74,45 +74,10 @@ class KeygenAPI:
             user_id = user_data['data']['id']
             logger.info(f"User ID: {user_id}")
             
-            # Mettre à jour le statut de l'utilisateur en INACTIVE
-            KeygenAPI.update_user_status(user_id, 'INACTIVE')
-            
             return user_data
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Error creating user: {e}")
-            return None
-
-    @staticmethod
-    def update_user_status(user_id, status):
-        logger.info(f"Updating status for user {user_id} to {status}")
-        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
-        payload = {
-            "data": {
-                "type": "users",
-                "id": user_id,
-                "attributes": {
-                    "status": status
-                }
-            }
-        }
-        
-        try:
-            response = requests.patch(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Headers: {response.headers}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            return response.json()
-        
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error updating user status: {e}")
             return None
 
     @staticmethod
@@ -216,6 +181,38 @@ class KeygenAPI:
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Error validating and activating user: {e}")
+            return None
+
+    @staticmethod
+    def update_user_status(user_id, status):
+        logger.info(f"Updating status for user {user_id} to {status}")
+        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
+        payload = {
+            "data": {
+                "type": "users",
+                "id": user_id,
+                "attributes": {
+                    "status": status
+                }
+            }
+        }
+        
+        try:
+            response = requests.patch(
+                url=url,
+                json=payload,
+                headers=KeygenAPI.get_headers()
+            )
+            
+            logger.debug(f"API Response Status: {response.status_code}")
+            logger.debug(f"API Response Headers: {response.headers}")
+            logger.debug(f"API Response Content: {response.text}")
+            
+            response.raise_for_status()
+            return response.json()
+        
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error updating user status: {e}")
             return None
 
     @staticmethod
