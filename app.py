@@ -5,6 +5,8 @@ from email.mime.text import MIMEText
 import os
 from functools import wraps
 import logging
+import re
+from datetime import datetime, timedelta
 
 # Configuration du logging
 logging.basicConfig(
@@ -26,6 +28,24 @@ class Config:
     TRIAL_POLICY_ID = os.getenv('KEYGEN_TRIAL_POLICY_ID')
     STANDALONE_POLICY_ID = os.getenv('KEYGEN_STANDALONE_POLICY_ID')
 
+def validate_email(email):
+    """Valide le format de l'adresse email."""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        raise ValueError("Invalid email format")
+    return True
+
+def validate_smtp_config():
+    """Valide la configuration SMTP au démarrage."""
+    required_configs = ['SMTP_SERVER', 'SMTP_PORT', 'EMAIL_USER', 'EMAIL_PASSWORD']
+    missing = [config for config in required_configs if not getattr(Config, config)]
+    if missing:
+        raise ValueError(f"Missing SMTP configuration: {', '.join(missing)}")
+
+class KeygenError(Exception):
+    """Exception personnalisée pour les erreurs Keygen."""
+    pass
+
 class KeygenAPI:
     BASE_URL = "https://api.keygen.sh/v1/accounts"
     
@@ -38,13 +58,35 @@ class KeygenAPI:
         }
 
     @staticmethod
+    def handle_response(response):
+        """Gère les réponses de l'API Keygen de manière uniforme."""
+        try:
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            error_message = "Unknown error"
+            if response.content:
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('errors', [{}])[0].get('detail', 'Unknown error')
+                except:
+                    error_message = response.text
+            logger.error(f"Keygen API error: {error_message}")
+            raise KeygenError(f"Keygen API error: {error_message}")
+
+    @staticmethod
     def get_policy_id(license_type):
+        """Retourne l'ID de la politique en fonction du type de licence."""
+        if license_type.lower() not in ['trial', 'standalone']:
+            raise ValueError("Invalid license type. Must be 'trial' or 'standalone'")
         return Config.TRIAL_POLICY_ID if license_type.lower() == 'trial' else Config.STANDALONE_POLICY_ID
 
     @staticmethod
     def create_user(first_name, last_name, email):
+        """Crée un nouvel utilisateur dans Keygen."""
         logger.info(f"Creating user for {email}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users"
+        
         payload = {
             "data": {
                 "type": "users",
@@ -56,50 +98,28 @@ class KeygenAPI:
             }
         }
         
-        try:
-            response = requests.post(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Headers: {response.headers}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            user_data = response.json()
-            
-            # Récupérer l'UUID de l'utilisateur
-            user_id = user_data['data']['id']
-            logger.info(f"User ID: {user_id}")
-            
-            # Créer une licence d'essai pour l'utilisateur
-            license_data = KeygenAPI.create_license(user_id, 'trial')
-            
-            # Créer un token d'activation pour l'utilisateur
-            activation_token = KeygenAPI.create_activation_token(user_id)
-            
-            return {
-                "user": user_data,
-                "license": license_data,
-                "activation_token": activation_token
-            }
+        response = requests.post(
+            url=url,
+            json=payload,
+            headers=KeygenAPI.get_headers()
+        )
         
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error creating user: {e}")
-            return None
+        return KeygenAPI.handle_response(response)
 
     @staticmethod
     def create_license(user_id, license_type):
+        """Crée une nouvelle licence pour l'utilisateur."""
         logger.info(f"Creating {license_type} license for user {user_id}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
+        
+        expiry = "30d" if license_type.lower() == 'trial' else None
+        
         payload = {
             "data": {
                 "type": "licenses",
                 "attributes": {
                     "name": f"License for {user_id}",
-                    "expiry": "30d"  # Exemple pour une licence d'essai de 30 jours
+                    **({"expiry": expiry} if expiry else {})
                 },
                 "relationships": {
                     "policy": {
@@ -118,28 +138,20 @@ class KeygenAPI:
             }
         }
         
-        try:
-            response = requests.post(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Headers: {response.headers}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            return response.json()
+        response = requests.post(
+            url=url,
+            json=payload,
+            headers=KeygenAPI.get_headers()
+        )
         
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error creating license: {e}")
-            return None
+        return KeygenAPI.handle_response(response)
 
     @staticmethod
     def create_activation_token(user_id):
+        """Crée un token d'activation pour l'utilisateur."""
         logger.info(f"Creating activation token for user {user_id}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/tokens"
+        
         payload = {
             "data": {
                 "type": "tokens",
@@ -157,196 +169,49 @@ class KeygenAPI:
             }
         }
         
-        try:
-            response = requests.post(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            return response.json()["data"]["attributes"]["token"]
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to create activation token: {str(e)}")
-            raise ValueError(f"Failed to create activation token: {str(e)}")
+        response = requests.post(
+            url=url,
+            json=payload,
+            headers=KeygenAPI.get_headers()
+        )
+        
+        result = KeygenAPI.handle_response(response)
+        return result["data"]["attributes"]["token"]
 
     @staticmethod
     def validate_and_activate_user(token):
+        """Valide et active un utilisateur avec son token."""
         logger.info("Validating and activating user with token")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/tokens/{token}/actions/validate"
         
-        try:
-            response = requests.post(
-                url=url,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            return response.json()
+        response = requests.post(
+            url=url,
+            headers=KeygenAPI.get_headers()
+        )
         
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error validating and activating user: {e}")
-            return None
-
-    @staticmethod
-    def update_user_status(user_id, status):
-        logger.info(f"Updating status for user {user_id} to {status}")
-        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
-        payload = {
-            "data": {
-                "type": "users",
-                "id": user_id,
-                "attributes": {
-                    "status": status
-                }
-            }
-        }
-        
-        try:
-            response = requests.patch(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Headers: {response.headers}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            return response.json()
-        
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error updating user status: {e}")
-            return None
-
-    @staticmethod
-    def create_machine(license_id, fingerprint):
-        logger.info(f"Creating machine for license {license_id} with fingerprint {fingerprint}")
-        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/machines"
-        payload = {
-            "data": {
-                "type": "machines",
-                "attributes": {
-                    "fingerprint": fingerprint
-                },
-                "relationships": {
-                    "license": {
-                        "data": {
-                            "type": "licenses",
-                            "id": license_id
-                        }
-                    }
-                }
-            }
-        }
-        
-        try:
-            response = requests.post(
-                url=url,
-                json=payload,
-                headers=KeygenAPI.get_headers()
-            )
-            
-            logger.debug(f"API Response Status: {response.status_code}")
-            logger.debug(f"API Response Content: {response.text}")
-            
-            response.raise_for_status()
-            return response.json()["data"]["id"]
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to create machine: {str(e)}")
-            raise ValueError(f"Failed to create machine: {str(e)}")
-
-    @staticmethod
-    def validate_license(email, license_key, fingerprint):
-        logger.info(f"Validating license for {email} with fingerprint {fingerprint}")
-        try:
-            # Validate license
-            license_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/validate"
-            license_response = requests.get(
-                license_url,
-                headers=KeygenAPI.get_headers()
-            )
-            license_response.raise_for_status()
-            license_data = license_response.json()
-
-            if not license_data.get("meta", {}).get("valid"):
-                raise ValueError("Invalid license")
-
-            # Validate user
-            user_id = license_data.get("data", {}).get("relationships", {}).get("user", {}).get("data", {}).get("id")
-            if not user_id:
-                raise ValueError("User information not found in license data")
-
-            user_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/users/{user_id}"
-            user_response = requests.get(
-                user_url,
-                headers=KeygenAPI.get_headers()
-            )
-            user_response.raise_for_status()
-            user_data = user_response.json()
-
-            user_email = user_data.get("data", {}).get("attributes", {}).get("email")
-            if not user_email or user_email != email:
-                raise ValueError("Email does not match license")
-
-            # Validate machine fingerprint
-            machines_url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses/{license_key}/machines"
-            machines_response = requests.get(
-                machines_url,
-                headers=KeygenAPI.get_headers()
-            )
-            machines_response.raise_for_status()
-            machines_data = machines_response.json()
-            machines = machines_data.get("data", [])
-
-            if not machines:
-                logger.info("No machines registered, registering new machine")
-                try:
-                    KeygenAPI.create_machine(license_key, fingerprint)
-                except Exception as e:
-                    logger.error(f"Failed to register new machine: {str(e)}")
-                    raise ValueError(f"Could not register new machine: {str(e)}")
-            else:
-                fingerprint_valid = any(
-                    machine.get("attributes", {}).get("fingerprint") == fingerprint 
-                    for machine in machines
-                )
-                if not fingerprint_valid:
-                    logger.info("Invalid fingerprint, attempting to register new machine")
-                    try:
-                        KeygenAPI.create_machine(license_key, fingerprint)
-                    except Exception as e:
-                        logger.error(f"Failed to register new machine: {str(e)}")
-                        raise ValueError(f"Could not register new machine: {str(e)}")
-
-            return {
-                "valid": True,
-                "userId": user_id,
-                "licenseId": license_key,
-                "status": license_data.get("data", {}).get("attributes", {}).get("status")
-            }
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"License validation failed: {str(e)}")
-            raise ValueError(f"License validation failed: {str(e)}")
+        return KeygenAPI.handle_response(response)
 
 def send_activation_email(email, token):
-    activation_link = url_for('activate_user', token=token, _external=True)
-    subject = "Activate your account"
-    body = f"Please click the following link to activate your account: {activation_link}"
-    msg = MIMEText(body)
-    msg['Subject'] = subject
-    msg['From'] = Config.EMAIL_USER
-    msg['To'] = email
-
+    """Envoie l'email d'activation à l'utilisateur."""
     try:
+        validate_smtp_config()
+        
+        activation_link = f"{Config.FRONTEND_URL}/activate?token={token}"
+        subject = "Activate your account"
+        body = f"""
+        Welcome!
+        
+        Please click the following link to activate your account:
+        {activation_link}
+        
+        This link will expire in 24 hours.
+        """
+        
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = Config.EMAIL_USER
+        msg['To'] = email
+
         with smtplib.SMTP(Config.SMTP_SERVER, Config.SMTP_PORT) as server:
             server.starttls()
             server.login(Config.EMAIL_USER, Config.EMAIL_PASSWORD)
@@ -354,8 +219,10 @@ def send_activation_email(email, token):
             logger.info(f"Activation email sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send activation email: {e}")
+        raise
 
 def validate_json_payload(*required_fields):
+    """Décorateur pour valider les payloads JSON."""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -379,131 +246,70 @@ def validate_json_payload(*required_fields):
         return decorated_function
     return decorator
 
-@app.route('/validate-license', methods=['POST'])
-@validate_json_payload('email', 'licenseKey', 'fingerprint')
-def validate_license():
-    try:
-        data = request.get_json()
-        logger.info(f"License validation request received for {data['email']}")
-        
-        validation_result = KeygenAPI.validate_license(
-            data['email'],
-            data['licenseKey'],
-            data['fingerprint']
-        )
-        
-        logger.info("License validation successful")
-        return jsonify(validation_result), 200
-        
-    except ValueError as e:
-        logger.warning(f"License validation failed: {str(e)}")
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        logger.error(f"Unexpected error during license validation: {str(e)}")
-        return jsonify({"error": "An unexpected error occurred"}), 500
-
 @app.route('/register', methods=['POST'])
+@validate_json_payload('first_name', 'last_name', 'email')
 def register():
-    data = request.json
-    first_name = data.get('first_name')
-    last_name = data.get('last_name')
-    email = data.get('email')
-    
-    result = KeygenAPI.create_user(first_name, last_name, email)
-    if result:
-        send_activation_email(email, result['activation_token'])
-        return jsonify({"message": "User created. Please check your email to activate your account."}), 201
-    else:
-        return jsonify({"message": "Failed to create user."}), 400
-
-@app.route('/activate/<token>', methods=['GET'])
-def activate_user(token):
-    result = KeygenAPI.validate_and_activate_user(token)
-    if result:
-        return jsonify({"message": "User activated successfully."}), 200
-    else:
-        return jsonify({"message": "Failed to activate user."}), 400
-
-@app.route('/create', methods=['POST'])
-@validate_json_payload('first_name', 'last_name', 'email', 'license_type')
-def create():
+    """Point d'entrée pour l'inscription d'un nouvel utilisateur."""
     try:
         data = request.get_json()
-        logger.info(f"User creation request received for {data['email']}")
         
         # Validation des données
-        if not all([data['first_name'], data['last_name'], data['email'], data['license_type']]):
-            raise ValueError("All fields must not be empty")
-            
-        # Normalisation du type de licence
-        license_type = data['license_type'].lower()
-        if license_type not in ['trial', 'standalone']:
-            raise ValueError("Invalid license type. Must be 'trial' or 'standalone'")
-        
+        validate_email(data['email'])
+        if not all([data['first_name'].strip(), data['last_name'].strip()]):
+            raise ValueError("First name and last name cannot be empty")
+
         # Création de l'utilisateur
-        user_id = KeygenAPI.create_user(
+        user_result = KeygenAPI.create_user(
             data['first_name'],
             data['last_name'],
             data['email']
         )
-        logger.info(f"User created with ID: {user_id}")
-        
-        # Création de la licence
-        license_name = f"License for {data['first_name']} {data['last_name']}"
-        license_id = KeygenAPI.create_license(
-            user_id,
-            license_type,
-            license_name
-        )
-        logger.info(f"License created with ID: {license_id}")
+        user_id = user_result['data']['id']
+
+        # Création de la licence trial
+        license_result = KeygenAPI.create_license(user_id, 'trial')
         
         # Création du token d'activation
         activation_token = KeygenAPI.create_activation_token(user_id)
-        logger.info("Activation token created")
         
         # Envoi de l'email d'activation
-        try:
-            send_activation_email(data['email'], activation_token)
-            logger.info("Activation email sent")
-        except Exception as e:
-            logger.warning(f"Failed to send activation email: {str(e)}")
-            # On continue même si l'envoi de l'email échoue
+        send_activation_email(data['email'], activation_token)
         
         return jsonify({
-            "message": "User created successfully",
+            "message": "User registered successfully. Please check your email for activation instructions.",
             "userId": user_id,
-            "licenseId": license_id,
-            "activationToken": activation_token
+            "licenseId": license_result['data']['id']
         }), 201
-
+        
     except ValueError as e:
-        logger.warning(f"Validation error: {str(e)}")
+        return jsonify({"error": str(e)}), 400
+    except KeygenError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Unexpected error during registration: {str(e)}")
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 @app.route('/activate', methods=['POST'])
 @validate_json_payload('token')
 def activate_user():
+    """Point d'entrée pour l'activation d'un utilisateur."""
     try:
         token = request.get_json()['token']
-        logger.info("User activation request received")
         
-        user_id = KeygenAPI.validate_and_activate_user(token)
+        # Valide et active l'utilisateur
+        result = KeygenAPI.validate_and_activate_user(token)
+        user_id = result['data']['id']
         
-        logger.info(f"User {user_id} activated successfully")
         return jsonify({
             "message": "User activated successfully",
             "userId": user_id
         }), 200
         
-    except ValueError as e:
-        logger.warning(f"User activation failed: {str(e)}")
+    except KeygenError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
-        logger.error(f"Unexpected error during user activation: {str(e)}")
-        return jsonify({"error": "Failed to activate user"}), 500
+        logger.error(f"Unexpected error during activation: {str(e)}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
 
 @app.errorhandler(404)
 def not_found_error(error):
@@ -528,5 +334,8 @@ def log_response_info(response):
     return response
 
 if __name__ == '__main__':
+    # Validation de la configuration au démarrage
+    validate_smtp_config()
+    
     logger.info("Starting Flask application")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
