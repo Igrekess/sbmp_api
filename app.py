@@ -22,7 +22,26 @@ class KeygenAPI:
     @staticmethod
     def get_policy_id(license_type):
         return Config.TRIAL_POLICY_ID if license_type.lower() == 'trial' else Config.STANDALONE_POLICY_ID
-
+    @staticmethod
+    def update_user_status(user_id, status):
+        api_url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/users/{user_id}"
+        headers = {
+            "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
+            "Content-Type": "application/vnd.api+json"
+        }
+        payload = {
+            "data": {
+                "type": "users",
+                "id": user_id,
+                "attributes": {
+                    "status": status
+                }
+            }
+        }
+    
+    response = requests.patch(api_url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()["data"]["id"]
     @staticmethod
     def create_user(first_name, last_name, email):
         api_url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/users"
@@ -258,6 +277,7 @@ def create():
 
     try:
         user_id = KeygenAPI.create_user(first_name, last_name, email)
+        KeygenAPI.update_user_status(user_id, "INACTIVE")
         license_id = KeygenAPI.create_license(user_id, license_type, license_name)
         activation_token = KeygenAPI.create_activation_token(user_id)
         send_activation_email(email, activation_token)
