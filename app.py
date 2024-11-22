@@ -64,6 +64,9 @@ class Config:
     EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
     TRIAL_POLICY_ID = os.getenv('KEYGEN_TRIAL_POLICY_ID')
     STANDALONE_POLICY_ID = os.getenv('KEYGEN_STANDALONE_POLICY_ID')
+    ENTERPRISE6_POLICY_ID = os.getenv('KEYGEN_ENTERPRISE6_POLICY_ID')
+    ENTERPRISE10_POLICY_ID = os.getenv('KEYGEN_ENTERPRISE10_POLICY_ID')  
+    ENTERPRISE20_POLICY_ID = os.getenv('KEYGEN_ENTERPRISE20_POLICY_ID')
 
 class KeygenError(Exception):
     pass
@@ -129,9 +132,16 @@ class KeygenAPI:
 
     @staticmethod
     def get_policy_id(license_type):
-        if license_type.lower() not in ['trial', 'standalone']:
-            raise ValueError("Invalid license type. Must be 'trial' or 'standalone'")
-        return Config.TRIAL_POLICY_ID if license_type.lower() == 'trial' else Config.STANDALONE_POLICY_ID
+        policy_id_map = {
+            'trial': Config.TRIAL_POLICY_ID,
+            'standalone': Config.STANDALONE_POLICY_ID,
+            'enterprise6': Config.ENTERPRISE6_POLICY_ID,
+            'enterprise10': Config.ENTERPRISE10_POLICY_ID,
+            'enterprise20': Config.ENTERPRISE20_POLICY_ID
+        }
+        if license_type.lower() not in policy_id_map:
+            raise ValueError("Invalid license type. Must be one of 'trial', 'standalone', 'enterprise6', 'enterprise10', 'enterprise20'")
+        return policy_id_map[license_type.lower()]
 
     @staticmethod
     def get_user_by_email(email):
@@ -182,12 +192,16 @@ class KeygenAPI:
     def create_license(user_id, first_name, last_name, license_type):
         logger.info(f"Creating {license_type} license for user {first_name} {last_name}")
         url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
+        
+        expiry = None
+        if license_type.lower() == 'trial':
+            expiry = "30d"
+        
         payload = {
             "data": {
                 "type": "licenses",
                 "attributes": {
-                    "name": f"License for {first_name} {last_name}",
-                    "expiry": "30d"  # Exemple pour une licence d'essai de 30 jours
+                    "name": f"License for {first_name} {last_name}"
                 },
                 "relationships": {
                     "policy": {
@@ -205,6 +219,9 @@ class KeygenAPI:
                 }
             }
         }
+        
+        if expiry:
+            payload["data"]["attributes"]["expiry"] = expiry
         
         try:
             response = requests.post(
@@ -238,33 +255,16 @@ class KeygenAPI:
             response_data = KeygenAPI.handle_response(response)
             licenses = response_data.get('data', [])
             
-            for license in licenses:
-                if license.get('attributes', {}).get('key') == license_key:
-                    logger.debug(f"License ID for key {license_key}: {license['id']}")
-                    return license['id']
-            logger.error(f"No license found for key {license_key}")
-            return None
+            if licenses:
+                logger.debug(f"License ID for key {license_key}: {licenses[0]['id']}")
+                return licenses[0]['id']
+            else:
+                logger.error(f"No license found for key {license_key}")
+                return None
             
         except KeygenError as e:
             logger.error(f"Error getting license ID for key {license_key}: {str(e)}")
             return None
-
-    @staticmethod
-    def get_user_licenses(user_id):
-        url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/licenses"
-        params = {'user': user_id}
-        
-        response = requests.get(
-            url=url,
-            params=params,
-            headers=KeygenAPI.get_headers()
-        )
-        
-        try:
-            response_data = KeygenAPI.handle_response(response)
-            return response_data.get('data', [])
-        except KeygenError:
-            return []
 
     @staticmethod
     def validate_license(email, license_id, fingerprint):
@@ -288,8 +288,8 @@ class KeygenAPI:
             result = {
                 "success": False,
                 "expiry": None,
-                "maxMachines": None,
-                "status": "INVALID"
+                "status": "INVALID",
+                "error": None
             }
 
             if not license_data.get("meta", {}).get("valid"):
@@ -297,22 +297,24 @@ class KeygenAPI:
 
             # Récupérer les détails de la licence
             license_attrs = license_data.get("data", {}).get("attributes", {})
+            expiry = license_attrs.get("expiry")
+            if not expiry:
+                expiry = "unlimited"
             result.update({
                 "success": True,
-                "expiry": license_attrs.get("expiry"),
-                "maxMachines": license_attrs.get("maxMachines"),
+                "expiry": expiry,
                 "status": license_attrs.get("status", "ACTIVE")
             })
 
             return result
 
-        except Exception as e:
+        except KeygenError as e:
             logger.error(f"License validation failed: {str(e)}")
             return {
                 "success": False,
                 "expiry": None,
-                "maxMachines": None,
-                "status": "ERROR"
+                "status": "ERROR",
+                "error": str(e)
             }
 
     @staticmethod
@@ -442,37 +444,32 @@ def validate_json_payload(*required_fields):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if not request.is_json:
-                return jsonify({"success": False}), HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+                return jsonify({"success": False, "error": "Invalid content type"}), HTTPStatus.UNSUPPORTED_MEDIA_TYPE
             
             data = request.get_json()
             missing_fields = [field for field in required_fields if field not in data]
             
             if missing_fields:
-                return jsonify({"success": False, "missing_fields": missing_fields}), HTTPStatus.BAD_REQUEST
+                return jsonify({"success": False, "error": f"Missing required fields: {', '.join(missing_fields)}"}), HTTPStatus.BAD_REQUEST
                 
             return f(*args, **kwargs)
         return decorated_function
     return decorator
 
-@app.route('/register', methods=['POST'])
-@validate_json_payload('first_name', 'last_name', 'email', 'fingerprint')
-def register():
+@app.route('/create', methods=['POST'])
+@validate_json_payload('first_name', 'last_name', 'email', 'license_type', 'fingerprint')
+def create_license():
     try:
         data = request.get_json()
         
         validate_email(data['email'])
         if not all([data['first_name'].strip(), data['last_name'].strip()]):
-            return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
+            return jsonify({"success": False, "error": "Invalid name"}), HTTPStatus.BAD_REQUEST
 
         existing_user = KeygenAPI.get_user_by_email(data['email'])
         
         if existing_user:
             user_id = existing_user['id']
-            existing_licenses = KeygenAPI.get_user_licenses(user_id)
-            active_license = next((lic for lic in existing_licenses if lic['attributes']['status'] == 'ACTIVE'), None)
-            
-            if active_license:
-                return jsonify({"success": True}), HTTPStatus.OK
         else:
             try:
                 user_result = KeygenAPI.create_user(
@@ -481,41 +478,54 @@ def register():
                     data['email']
                 )
                 user_id = user_result['data']['id']
-            except KeygenError:
-                return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
+            except KeygenError as e:
+                return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
 
         try:
-            license_result = KeygenAPI.create_license(user_id, data['first_name'], data['last_name'], 'trial')
+            license_result = KeygenAPI.create_license(user_id, data['first_name'], data['last_name'], data['license_type'])
             license_key = license_result['data']['attributes']['key']
             license_id = license_result['data']['id']
-        except KeygenError:
-            return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
+            expiry = license_result['data']['attributes']['expiry'] 
+        except KeygenError as e:
+            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
 
         try:
             KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
         except KeygenError as e:
             logger.error(f"Failed to register fingerprint: {str(e)}")
-            return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
+            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
 
+        is_trial = data['license_type'].lower() == 'trial'  
         email_sent = send_license_email(
             data['email'], 
             license_key, 
             data['first_name'],
-            is_trial=True
+            is_trial=is_trial
         )
 
-        return jsonify({"success": email_sent}), HTTPStatus.CREATED if email_sent else HTTPStatus.INTERNAL_SERVER_ERROR
+        if is_trial:
+            expiry_msg = expiry  
+        else:
+            expiry_msg = "unlimited"
+
+        return jsonify({
+            "success": email_sent,
+            "expiry": expiry_msg,
+            "error": "Failed to send email" if not email_sent else None
+        }), HTTPStatus.CREATED if email_sent else HTTPStatus.INTERNAL_SERVER_ERROR
 
     except ValueError as e:
         logger.warning(f"Invalid request data: {str(e)}")
-        return jsonify({"success": False}), HTTPStatus.BAD_REQUEST
+        return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
     except Exception as e:
-        logger.error(f"Unexpected error during registration: {str(e)}")
-        return jsonify({"success": False}), HTTPStatus.INTERNAL_SERVER_ERROR
+        logger.error(f"Unexpected error during license creation: {str(e)}")
+        return jsonify({"success": False, "error": "An unexpected error occurred"}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.route('/validate', methods=['POST'])
-@validate_json_payload('email', 'licenseKey', 'fingerprint', 'first_name', 'last_name')
-def validate_license():
+@validate_json_payload('email', 'licenseKey', 'fingerprint')  
+def validate_license_route():
     try:
         data = request.get_json()
         
@@ -523,51 +533,34 @@ def validate_license():
         
         license_id = KeygenAPI.get_license_id_by_key(data['licenseKey'])
         if not license_id:
-            return jsonify({
-                "success": False,
-                "expiry": None,
-                "maxMachines": None,
-                "status": "INVALID"
-            }), HTTPStatus.BAD_REQUEST
+            return jsonify({"success": False, "error": "Invalid license key"}), HTTPStatus.BAD_REQUEST
         
         if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
-            try:
-                KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
+            try:  
+                KeygenAPI.create_machine(license_id, "", "", data['fingerprint'])
             except KeygenError as e:
                 logger.error(f"Failed to register fingerprint: {str(e)}")
-                return jsonify({
-                    "success": False,
-                    "expiry": None,
-                    "maxMachines": None,
-                    "status": "ERROR"
-                }), HTTPStatus.BAD_REQUEST
+                return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
 
         validation_result = KeygenAPI.validate_license(
-            data['email'],
+            data['email'], 
             license_id,
             data['fingerprint']
         )
-
-        return jsonify(validation_result), HTTPStatus.OK if validation_result["success"] else HTTPStatus.UNAUTHORIZED
+        
+        return jsonify({
+            "success": validation_result["success"],
+            "error": validation_result["error"] 
+        }), HTTPStatus.OK if validation_result["success"] else HTTPStatus.UNAUTHORIZED
 
     except ValueError as e:
         logger.warning(f"Invalid request data: {str(e)}")
-        return jsonify({
-            "success": False,
-            "expiry": None,
-            "maxMachines": None,
-            "status": "ERROR"
-        }), HTTPStatus.BAD_REQUEST
+        return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
     except Exception as e:
         logger.error(f"Unexpected error during validation: {str(e)}")
-        return jsonify({
-            "success": False,
-            "expiry": None,
-            "maxMachines": None,
-            "status": "ERROR"
-        }), HTTPStatus.INTERNAL_SERVER_ERROR
+        return jsonify({"success": False, "error": "An unexpected error occurred"}), HTTPStatus.INTERNAL_SERVER_ERROR
 
-@app.errorhandler(HTTPStatus.NOT_FOUND)
+@app.errorhandler(HTTPStatus.NOT_FOUND) 
 def not_found_error(error):
     return jsonify({"success": False, "error": str(error)}), HTTPStatus.NOT_FOUND
 
