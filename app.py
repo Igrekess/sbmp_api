@@ -445,7 +445,7 @@ def validate_json_payload(*required_fields):
     return decorator
 
 @app.route('/register', methods=['POST'])
-@validate_json_payload('first_name', 'last_name', 'email')
+@validate_json_payload('first_name', 'last_name', 'email', 'fingerprint')
 def register():
     try:
         data = request.get_json()
@@ -480,6 +480,13 @@ def register():
         try:
             license_result = KeygenAPI.create_license(user_id, data['first_name'], data['last_name'], 'trial')
             license_key = license_result['data']['attributes']['key']
+            license_id = license_result['data']['id']
+        except KeygenError:
+            return jsonify({"success": False}), 400
+
+        # Enregistrement du fingerprint
+        try:
+            KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
         except KeygenError:
             return jsonify({"success": False}), 400
 
@@ -498,7 +505,7 @@ def register():
         return jsonify({"success": False}), 500
 
 @app.route('/validate', methods=['POST'])
-@validate_json_payload('email', 'licenseKey', 'fingerprint')
+@validate_json_payload('email', 'licenseKey', 'fingerprint', 'first_name', 'last_name')
 def validate_license():
     try:
         data = request.get_json()
@@ -515,32 +522,25 @@ def validate_license():
                 "status": "INVALID"
             }), 400
         
+        # Vérifier si le fingerprint est déjà enregistré
+        if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
+            try:
+                KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
+            except KeygenError as e:
+                logger.error(f"Failed to register fingerprint: {str(e)}")
+                return jsonify({
+                    "success": False,
+                    "expiry": None,
+                    "maxMachines": None,
+                    "status": "ERROR"
+                }), 400
+
         # Validation de la licence
         validation_result = KeygenAPI.validate_license(
             data['email'],
             license_id,
             data['fingerprint']
         )
-        
-        if not validation_result["success"]:
-            # Si la validation échoue, vérifier si le fingerprint doit être enregistré
-            if not KeygenAPI.is_fingerprint_registered(license_id, data['fingerprint']):
-                try:
-                    KeygenAPI.create_machine(license_id, data['first_name'], data['last_name'], data['fingerprint'])
-                    # Réessayer la validation après l'enregistrement du fingerprint
-                    validation_result = KeygenAPI.validate_license(
-                        data['email'],
-                        license_id,
-                        data['fingerprint']
-                    )
-                except KeygenError as e:
-                    logger.error(f"Failed to register fingerprint: {str(e)}")
-                    return jsonify({
-                        "success": False,
-                        "expiry": None,
-                        "maxMachines": None,
-                        "status": "ERROR"
-                    }), 400
 
         return jsonify(validation_result), 200 if validation_result["success"] else 401
 
@@ -558,7 +558,7 @@ def validate_license():
             "maxMachines": None,
             "status": "ERROR"
         }), 500
-    
+
 @app.errorhandler(404)
 def not_found_error(error):
     return jsonify({"success": False}), 404
