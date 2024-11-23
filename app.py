@@ -393,6 +393,66 @@ class KeygenAPI:
         response = requests.get(url, headers=headers)
         return response.json()['data'] if response.status_code == 200 else []
 
+    @staticmethod
+    def get_machines_for_license_key(license_key):
+        """Récupère la liste des machines associées à une licence"""
+        try:
+            # D'abord récupérer l'ID de la licence
+            license_id = KeygenAPI.get_license_id_by_key(license_key)
+            if not license_id:
+                return {"success": False, "error": "License not found"}
+
+            url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/machines"
+            params = {'filter[license]': license_id}
+            
+            response = requests.get(
+                url=url,
+                params=params,
+                headers=KeygenAPI.get_headers()
+            )
+            
+            if response.status_code == 200:
+                machines_data = response.json().get('data', [])
+                machines = [{
+                    'id': machine['id'],
+                    'fingerprint': machine['attributes']['fingerprint'],
+                    'platform': machine['attributes']['platform'],
+                    'last_validated': machine['attributes'].get('lastValidated', 'Never')
+                } for machine in machines_data]
+                
+                return {
+                    "success": True,
+                    "machines": machines
+                }
+            else:
+                return {"success": False, "error": "Failed to fetch machines"}
+                
+        except Exception as e:
+            logger.error(f"Error fetching machines: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def delete_machines(license_key, machine_ids):
+        """Supprime les machines spécifiées d'une licence"""
+        try:
+            for machine_id in machine_ids:
+                url = f"{KeygenAPI.BASE_URL}/{Config.ACCOUNT_ID}/machines/{machine_id}"
+                
+                response = requests.delete(
+                    url=url,
+                    headers=KeygenAPI.get_headers()
+                )
+                
+                if response.status_code != 204:
+                    logger.error(f"Failed to delete machine {machine_id}")
+                    return {"success": False, "error": f"Failed to delete machine {machine_id}"}
+            
+            return {"success": True}
+                
+        except Exception as e:
+            logger.error(f"Error deleting machines: {str(e)}")
+            return {"success": False, "error": str(e)}
+
 def send_license_email(email, license_key, first_name, is_trial=True):
     if not validate_smtp_config():
         logger.warning("SMTP not configured correctly. Skipping email sending.")
@@ -557,6 +617,28 @@ def validate_license():
             "success": False,
             "error": str(e)
         }), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@app.route('/machines/<license_key>', methods=['GET'])
+def get_machines(license_key):
+    """Liste les machines associées à une licence"""
+    try:
+        result = KeygenAPI.get_machines_for_license_key(license_key)
+        return jsonify(result), HTTPStatus.OK if result["success"] else HTTPStatus.BAD_REQUEST
+    except Exception as e:
+        logger.error(f"Error in get_machines: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+@app.route('/machines', methods=['DELETE'])
+@validate_json_payload('license_key', 'machine_ids')
+def delete_machines():
+    """Supprime les machines sélectionnées"""
+    try:
+        data = request.get_json()
+        result = KeygenAPI.delete_machines(data['license_key'], data['machine_ids'])
+        return jsonify(result), HTTPStatus.OK if result["success"] else HTTPStatus.BAD_REQUEST
+    except Exception as e:
+        logger.error(f"Error in delete_machines: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @app.errorhandler(HTTPStatus.NOT_FOUND) 
 def not_found_error(error):
