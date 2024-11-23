@@ -670,8 +670,7 @@ def create_license():
             user_id,
             data['first_name'],
             data['last_name'],
-            data['license_type'],
-            license_name=data['license_type']
+            data['license_type']
         )
         
         # Enregistrer la machine
