@@ -652,19 +652,6 @@ def create_license():
         else:
             user_id = existing_user['id']
         
-        # Déterminer le nom de la licence en fonction du type
-        license_name_mapping = {
-            'trial': 'Trial License',
-            'standalone': 'Standalone License',
-            'enterprise6': 'Enterprise License (6 Users)',
-            'enterprise10': 'Enterprise License (10 Users)',
-            'enterprise20': 'Enterprise License (20 Users)'
-        }
-        license_name = license_name_mapping.get(data['license_type'])
-
-        if not license_name:
-            return jsonify({"success": False, "error": "Invalid license type"}), HTTPStatus.BAD_REQUEST
-        
         # Déterminer policy_id
         policy_mapping = {
             'trial': Config.TRIAL_POLICY_ID,
@@ -680,11 +667,11 @@ def create_license():
         
         # Créer licence avec fingerprint
         license_result = KeygenAPI.create_license(
-            user_id=user_id,
-            policy_id=policy_id,
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            license_name=license_name
+            user_id,
+            data['first_name'],
+            data['last_name'],
+            data['license_type'],
+            license_name=data['license_type']
         )
         
         # Enregistrer la machine
