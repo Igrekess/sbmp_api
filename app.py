@@ -507,13 +507,57 @@ class KeygenAPI:
             logger.error(f"Error deleting machines: {str(e)}")
             return {"success": False, "error": str(e)}
 
-def send_license_email(email, license_key, first_name, is_trial=True):
+def send_license_email(email, license_key, first_name, license_type='trial'):
+    """Envoie un email avec la clé de licence
+    
+    Args:
+        email (str): Email du destinataire
+        license_key (str): Clé de licence
+        first_name (str): Prénom du destinataire
+        license_type (str): Type de licence (trial, standalone, enterprise6, etc.)
+    """
     if not validate_smtp_config():
         logger.warning("SMTP not configured correctly. Skipping email sending.")
         return False
     
-    try:        
-        subject = "Welcome to StoryboardMaker Pro - Your License Key"
+    try:
+        # Templates spécifiques par type de licence
+        license_descriptions = {
+            'trial': {
+                'title': 'Your StoryboardMaker Pro Trial License',
+                'duration': '30 days trial period',
+                'features': 'full access to explore all premium features',
+                'machines': '1 machine'
+            },
+            'standalone': {
+                'title': 'Your StoryboardMaker Pro Standalone License',
+                'duration': 'perpetual license',
+                'features': 'full access to all premium features',
+                'machines': '2 machines'
+            },
+            'enterprise6': {
+                'title': 'Your StoryboardMaker Pro Enterprise 6 License',
+                'duration': 'perpetual license',
+                'features': 'full enterprise features',
+                'machines': '6 machines'
+            },
+            'enterprise10': {
+                'title': 'Your StoryboardMaker Pro Enterprise 10 License',
+                'duration': 'perpetual license',
+                'features': 'full enterprise features',
+                'machines': '10 machines'
+            },
+            'enterprise20': {
+                'title': 'Your StoryboardMaker Pro Enterprise 20 License',
+                'duration': 'perpetual license',
+                'features': 'full enterprise features',
+                'machines': '20 machines'
+            }
+        }
+        
+        license_info = license_descriptions.get(license_type, license_descriptions['trial'])
+        
+        subject = license_info['title']
         body = f"""
 Dear {first_name},
 
@@ -523,7 +567,8 @@ Here's your license key to get started:
 
     {license_key}
 
-{'Your trial license is valid for 30 days, giving you full access to explore all premium features.' if is_trial else 'Your license has been activated with full access to all premium features.'}
+You have received a {license_info['duration']} with {license_info['features']}.
+This license can be activated on {license_info['machines']}.
 
 Getting Started:
 
@@ -542,7 +587,7 @@ Key Features You Can Now Access:
 Need Help?
 If you have any questions or need assistance, feel free to contact me at support@dityan.com.
 
-Make the most of your 30-day trial! I hope StoryboardMaker Pro helps you save time and elevate your creative output.
+{'Make the most of your trial period!' if license_type == 'trial' else 'Thank you for your purchase!'} I hope StoryboardMaker Pro helps you save time and elevate your creative output.
 
 Best regards,
 Yan Senez
@@ -563,6 +608,7 @@ Note: Please keep this email for your records. Your license key may be needed fo
             server.login(Config.EMAIL_USER, Config.EMAIL_PASSWORD)
             server.sendmail(Config.EMAIL_USER, email, msg.as_string())
             return True
+            
     except Exception as e:
         logger.error(f"Failed to send license email: {str(e)}")
         return False
