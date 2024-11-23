@@ -213,7 +213,7 @@ class KeygenAPI:
         return KeygenAPI.handle_response(response)
 
     @staticmethod
-    def create_license(user_id, policy_id, first_name, last_name):
+    def create_license(user_id, policy_id, first_name, last_name, license_type=None):
         """Crée une nouvelle licence
         
         Args:
@@ -221,6 +221,7 @@ class KeygenAPI:
             policy_id (str): ID de la politique de licence (obligatoire)
             first_name (str): Prénom
             last_name (str): Nom
+            license_type (str, optional): Type de licence pour définir le nom
         """
         if not policy_id:
             raise KeygenError("Policy ID cannot be null")
@@ -248,7 +249,6 @@ class KeygenAPI:
             "data": {
                 "type": "licenses",
                 "attributes": {
-                    "name" : license_type,
                     "metadata": {
                         "first_name": first_name,
                         "last_name": last_name
@@ -270,6 +270,10 @@ class KeygenAPI:
                 }
             }
         }
+
+        # Ajouter le nom de la licence si license_type est fourni
+        if license_type:
+            payload["data"]["attributes"]["name"] = f"StoryboardMaker Pro {license_type.capitalize()} for {first_name}"
         
         logger.debug(f"Creating license with payload: {payload}")
         response = requests.post(url, json=payload, headers=headers)
