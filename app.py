@@ -273,7 +273,7 @@ class KeygenAPI:
 
         # Ajouter le nom de la licence si license_type est fourni
         if license_type:
-            payload["data"]["attributes"]["name"] = f"Storyboard Maker Pro {license_type.capitalize()} version"
+            payload["data"]["attributes"]["name"] = f"Storyboard Maker Pro {license_type.capitalize()} Version"
         
         logger.debug(f"Creating license with payload: {payload}")
         response = requests.post(url, json=payload, headers=headers)
