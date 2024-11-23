@@ -728,6 +728,52 @@ def extract_payment_data(payload):
         'last_name': payload['resource']['payer']['name']['surname']
     }
 
+@app.route('/test-ipn', methods=['POST'])
+def test_ipn():
+    try:
+        # Simuler une notification PayPal
+        test_payload = {
+            'payment_status': 'Completed',
+            'payer_email': 'sacha.rovinski.fb@gmail.com',
+            'first_name': 'Sacha',
+            'last_name': 'Rovinskifb',
+            'item_name': 'StoryboardMaker Pro Enterprise 20',
+            'mc_gross': '299.00',
+            'mc_currency': 'EUR'
+        }
+        
+        # Créer l'utilisateur test
+        user_result = KeygenAPI.create_user(
+            first_name=test_payload['first_name'],
+            last_name=test_payload['last_name'],
+            email=test_payload['payer_email']
+        )
+        
+        # Créer la licence test
+        license_result = KeygenAPI.create_license(
+            user_id=user_result['data']['id'],
+            policy_id=Config.ENTERPRISE20_POLICY_ID,
+            first_name=test_payload['first_name'],
+            last_name=test_payload['last_name']
+        )
+        
+        # Envoyer l'email test
+        license_key = license_result['data']['attributes']['key']
+        send_license_email(test_payload['payer_email'], license_key, False)
+        
+        return jsonify({
+            "success": True,
+            "message": "Test IPN processed successfully",
+            "license_key": license_key
+        })
+        
+    except Exception as e:
+        logger.error(f"Test IPN error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.errorhandler(HTTPStatus.NOT_FOUND) 
 def not_found_error(error):
     return jsonify({"success": False, "error": str(error)}), HTTPStatus.NOT_FOUND
