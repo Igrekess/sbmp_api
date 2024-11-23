@@ -249,7 +249,7 @@ class KeygenAPI:
         
         Args:
             license_key (str): Clé de licence à valider
-            fingerprint (str): Empreinte machine
+            fingerprint (str): Empreinte machine (non utilisé pour la validation)
             email (str): Email de l'utilisateur
         """
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/actions/validate-key"
@@ -259,10 +259,10 @@ class KeygenAPI:
             "Content-Type": "application/json"
         }
         
+        # Simplification de la payload - uniquement key et email
         payload = {
             "meta": {
                 "key": license_key,
-                "fingerprint": fingerprint,
                 "email": email
             }
         }
@@ -272,11 +272,9 @@ class KeygenAPI:
             response_data = response.json()
             
             if response.status_code == 200:
-                # Récupérer les informations de la licence
                 license_data = response_data.get('data', {})
                 policy_id = license_data.get('relationships', {}).get('policy', {}).get('data', {}).get('id')
                 
-                # Mapping des types de licence
                 policy_mapping = {
                     Config.TRIAL_POLICY_ID: {'type': 'trial', 'max_machines': 1},
                     Config.STANDALONE_POLICY_ID: {'type': 'standalone', 'max_machines': 2},
