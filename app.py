@@ -663,15 +663,18 @@ def create_license():
         policy_id = policy_mapping.get(data['license_type'])
         
         if not policy_id:
-            return jsonify({"success": False, "error": "Invalid license type"}), HTTPStatus.BAD_REQUEST
+            return jsonify({"success": False, "error": f"Invalid license type: {data['license_type']}"}), HTTPStatus.BAD_REQUEST
         
         # Créer licence avec fingerprint
-        license_result = KeygenAPI.create_license(
-            user_id,
-            data['first_name'],
-            data['last_name'],
-            data['license_type']
-        )
+        try:
+            license_result = KeygenAPI.create_license(
+                user_id,
+                data['first_name'],
+                data['last_name'],
+                data['license_type']
+            )
+        except KeygenError as e:
+            return jsonify({"success": False, "error": str(e)}), HTTPStatus.BAD_REQUEST
         
         # Enregistrer la machine
         license_id = license_result['data']['id']
