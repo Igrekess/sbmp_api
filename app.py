@@ -245,13 +245,7 @@ class KeygenAPI:
 
     @staticmethod
     def validate_license(license_key, fingerprint, email):
-        """Valide une licence avec la clé via Keygen API
-        
-        Args:
-            license_key (str): Clé de licence
-            fingerprint (str): Empreinte machine
-            email (str): Email utilisateur
-        """
+        """Valide une licence et enregistre le fingerprint si nécessaire"""
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/actions/validate-key"
         
         headers = {
@@ -259,7 +253,6 @@ class KeygenAPI:
             "Content-Type": "application/json"
         }
         
-        # Structure de payload corrigée selon l'exemple AppleScript
         payload = {
             "meta": {
                 "key": license_key,
@@ -275,14 +268,20 @@ class KeygenAPI:
             response_data = response.json()
             
             if response.status_code == 200:
-                # Extraction des données comme dans l'AppleScript
                 meta_data = response_data.get('meta', {})
                 license_data = response_data.get('data', {})
                 attributes = license_data.get('attributes', {})
                 
-                is_valid = meta_data.get('valid', False)
+                # Vérifier si le fingerprint n'est pas enregistré
+                if meta_data.get('code') == 'NO_MACHINES':
+                    # Créer une nouvelle machine
+                    license_id = license_data.get('id')
+                    machine_result = KeygenAPI.create_machine(license_id, fingerprint)
+                    if machine_result:
+                        # Relancer la validation
+                        return KeygenAPI.validate_license(license_key, fingerprint, email)
                 
-                # Si la licence est valide, récupérer toutes les informations
+                is_valid = meta_data.get('valid', False)
                 if is_valid:
                     policy_id = license_data.get('relationships', {}).get('policy', {}).get('data', {}).get('id')
                     
@@ -295,17 +294,20 @@ class KeygenAPI:
                     }
                     
                     license_info = policy_mapping.get(policy_id, {'type': 'unknown', 'max_machines': 0})
+                    machines_count = license_data.get('relationships', {}).get('machines', {}).get('meta', {}).get('count', 0)
                     
                     return {
                         "success": True,
                         "licenseType": license_info['type'],
                         "status": attributes.get('status', 'unknown'),
                         "expiry": attributes.get('expiry', 'N/A'),
-                        "machinesRemaining": license_info['max_machines']
+                        "machinesRemaining": license_info['max_machines'] - machines_count
                     }
                 else:
-                    error_msg = response_data.get('errors', [{'detail': 'Validation failed'}])[0]['detail']
-                    return {"success": False, "error": error_msg}
+                    return {
+                        "success": False,
+                        "error": meta_data.get('detail', 'Validation failed')
+                    }
                     
         except Exception as e:
             logger.error(f"License validation request failed: {str(e)}")
