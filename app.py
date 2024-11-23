@@ -755,17 +755,19 @@ def handle_paypal_webhook():
         # Extraire les informations de la transaction
         payment_data = extract_payment_data(payload)
         
-        # Mapping des produits PayPal vers les types de licence
-        license_type_mapping = {
-            'PROD_STANDALONE': 'standalone',
-            'PROD_ENTERPRISE6': 'enterprise6',
-            'PROD_ENTERPRISE10': 'enterprise10',
-            'PROD_ENTERPRISE20': 'enterprise20'
+        # Mapping des produits vers les policy IDs
+        policy_mapping = {
+            'StoryboardMaker Pro Trial': Config.TRIAL_POLICY_ID,
+            'StoryboardMaker Pro Standalone': Config.STANDALONE_POLICY_ID,
+            'StoryboardMaker Pro Enterprise 6': Config.ENTERPRISE6_POLICY_ID, 
+            'StoryboardMaker Pro Enterprise 10': Config.ENTERPRISE10_POLICY_ID,
+            'StoryboardMaker Pro Enterprise 20': Config.ENTERPRISE20_POLICY_ID
         }
         
-        license_type = license_type_mapping.get(payment_data['product_id'])
-        if not license_type:
-            logger.error(f"Unknown product ID: {payment_data['product_id']}")
+        # Récupérer le policy_id correspondant
+        policy_id = policy_mapping.get(payment_data['item_name'])
+        if not policy_id:
+            logger.error(f"Unknown product name: {payment_data['item_name']}")
             return jsonify({"success": False, "error": "Invalid product"}), HTTPStatus.BAD_REQUEST
         
         # Créer l'utilisateur dans Keygen
@@ -777,15 +779,16 @@ def handle_paypal_webhook():
         
         # Créer la licence
         license_result = KeygenAPI.create_license(
-            user_result['data']['id'],
-            license_type,
-            payment_data['first_name'],
-            payment_data['last_name']
+            user_id=user_result['data']['id'],
+            policy_id=policy_id,
+            first_name=payment_data['first_name'],
+            last_name=payment_data['last_name']
         )
         
         # Envoyer l'email avec la clé de licence
         license_key = license_result['data']['attributes']['key']
-        if send_license_email(payment_data['email'], license_key, license_type):
+        license_type = payment_data['item_name'].lower().replace('storyboardmaker pro ', '')
+        if send_license_email(payment_data['email'], license_key, payment_data['first_name'], license_type):
             return jsonify({"success": True}), HTTPStatus.CREATED
         else:
             logger.error("Failed to send license email")
@@ -813,8 +816,16 @@ def extract_payment_data(payload):
 def test_ipn():
     logger.info("Test IPN endpoint hit")
     try:
-        # Log au début
         logger.info("Starting test IPN process")
+        
+        # Mapping des produits vers les policy IDs
+        policy_mapping = {
+            'StoryboardMaker Pro Trial': Config.TRIAL_POLICY_ID,
+            'StoryboardMaker Pro Standalone': Config.STANDALONE_POLICY_ID,
+            'StoryboardMaker Pro Enterprise 6': Config.ENTERPRISE6_POLICY_ID, 
+            'StoryboardMaker Pro Enterprise 10': Config.ENTERPRISE10_POLICY_ID,
+            'StoryboardMaker Pro Enterprise 20': Config.ENTERPRISE20_POLICY_ID
+        }
         
         # Simuler une notification PayPal
         test_payload = {
@@ -822,14 +833,17 @@ def test_ipn():
             'payer_email': 'sacha.rovinski.fb@gmail.com',
             'first_name': 'Sachyan',
             'last_name': 'Ryvysy',
-            'item_name': 'StoryboardMaker Pro Enterprise 20',
+            'item_name': 'StoryboardMaker Pro Enterprise 20',  # Nom exact du produit
             'mc_gross': '299.00',
             'mc_currency': 'EUR'
         }
         
-        logger.info(f"Creating user with payload: {test_payload}")
-        
-        # Créer l'utilisateur test
+        # Récupérer le policy_id correspondant
+        policy_id = policy_mapping.get(test_payload['item_name'])
+        if not policy_id:
+            raise ValueError(f"Invalid product name: {test_payload['item_name']}")
+            
+        # Créer l'utilisateur
         user_result = KeygenAPI.create_user(
             first_name=test_payload['first_name'],
             last_name=test_payload['last_name'],
@@ -837,24 +851,31 @@ def test_ipn():
         )
         logger.info(f"User created: {user_result}")
         
-        # Créer la licence test
+        # Créer la licence avec le bon policy_id
         license_result = KeygenAPI.create_license(
             user_id=user_result['data']['id'],
-            policy_id=Config.ENTERPRISE20_POLICY_ID,
+            policy_id=policy_id,
             first_name=test_payload['first_name'],
             last_name=test_payload['last_name']
         )
         logger.info(f"License created: {license_result}")
         
-        # Envoyer l'email test
+        # Envoyer l'email
         license_key = license_result['data']['attributes']['key']
-        send_result = send_license_email(test_payload['payer_email'], license_key, False)
+        license_type = test_payload['item_name'].lower().replace('storyboardmaker pro ', '')
+        send_result = send_license_email(
+            test_payload['payer_email'],
+            license_key,
+            test_payload['first_name'],
+            license_type
+        )
         logger.info(f"Email sent: {send_result}")
         
         return jsonify({
             "success": True,
             "message": "Test IPN processed successfully",
-            "license_key": license_key
+            "license_key": license_key,
+            "license_type": license_type
         })
         
     except Exception as e:
