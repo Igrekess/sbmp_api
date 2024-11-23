@@ -1,4 +1,7 @@
 from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_jwt_extended import JWTManager
 import requests
 import smtplib
 from email.mime.text import MIMEText
@@ -54,6 +57,27 @@ logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Configuration du JWT
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key')  # À changer en production
+jwt = JWTManager(app)
+
+# Configuration du Limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["1000 per day"]
+)
+
+# Headers de sécurité
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Content-Security-Policy'] = "default-src 'self'"
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
 
 class Config:
     ACCOUNT_ID = os.getenv('KEYGEN_ACCOUNT_ID')
@@ -634,6 +658,75 @@ def delete_machines():
     except Exception as e:
         logger.error(f"Error in delete_machines: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+# Nouvelle route pour recevoir les webhooks PayPal
+@app.route('/paypal-webhook', methods=['POST'])
+def handle_paypal_webhook():
+    try:
+        # Vérifier l'authenticité de la requête PayPal
+        payload = request.get_json()
+        
+        # Vérifier la signature PayPal avec les en-têtes
+        paypal_auth = verify_paypal_signature(request.headers, payload)
+        if not paypal_auth:
+            return jsonify({"success": False, "error": "Invalid PayPal signature"}), HTTPStatus.UNAUTHORIZED
+        
+        # Extraire les informations de la transaction
+        payment_data = extract_payment_data(payload)
+        
+        # Mapping des produits PayPal vers les types de licence
+        license_type_mapping = {
+            'PROD_STANDALONE': 'standalone',
+            'PROD_ENTERPRISE6': 'enterprise6',
+            'PROD_ENTERPRISE10': 'enterprise10',
+            'PROD_ENTERPRISE20': 'enterprise20'
+        }
+        
+        license_type = license_type_mapping.get(payment_data['product_id'])
+        if not license_type:
+            logger.error(f"Unknown product ID: {payment_data['product_id']}")
+            return jsonify({"success": False, "error": "Invalid product"}), HTTPStatus.BAD_REQUEST
+        
+        # Créer l'utilisateur dans Keygen
+        user_result = KeygenAPI.create_user(
+            payment_data['first_name'],
+            payment_data['last_name'],
+            payment_data['email']
+        )
+        
+        # Créer la licence
+        license_result = KeygenAPI.create_license(
+            user_result['data']['id'],
+            license_type,
+            payment_data['first_name'],
+            payment_data['last_name']
+        )
+        
+        # Envoyer l'email avec la clé de licence
+        license_key = license_result['data']['attributes']['key']
+        if send_license_email(payment_data['email'], license_key, license_type):
+            return jsonify({"success": True}), HTTPStatus.CREATED
+        else:
+            logger.error("Failed to send license email")
+            return jsonify({"success": False, "error": "Email sending failed"}), HTTPStatus.INTERNAL_SERVER_ERROR
+            
+    except Exception as e:
+        logger.error(f"PayPal webhook error: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+def verify_paypal_signature(headers, payload):
+    """Vérifie la signature du webhook PayPal"""
+    # Implémentation de la vérification de la signature PayPal
+    pass
+
+def extract_payment_data(payload):
+    """Extrait les informations pertinentes du payload PayPal"""
+    return {
+        'product_id': payload['resource']['custom_id'],
+        'email': payload['resource']['payer']['email_address'],
+        'first_name': payload['resource']['payer']['name']['given_name'],
+        'last_name': payload['resource']['payer']['name']['surname']
+    }
 
 @app.errorhandler(HTTPStatus.NOT_FOUND) 
 def not_found_error(error):
