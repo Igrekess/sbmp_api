@@ -514,40 +514,40 @@ def send_license_email(email, license_key, first_name, license_type='trial'):
         email (str): Email du destinataire
         license_key (str): Clé de licence
         first_name (str): Prénom du destinataire
-        license_type (str): Type de licence (trial, standalone, enterprise6, etc.)
+        license_type (str): Type de licence (nom complet du produit)
     """
     if not validate_smtp_config():
         logger.warning("SMTP not configured correctly. Skipping email sending.")
         return False
     
     try:
-        # Templates spécifiques par type de licence
-        license_descriptions = {
-            'trial': {
+        # Mapping des produits vers les types de licence
+        license_type_mapping = {
+            'StoryboardMaker Pro Trial': {
                 'title': 'Your StoryboardMaker Pro Trial License',
                 'duration': '30 days trial period',
                 'features': 'full access to explore all premium features',
                 'machines': '1 machine'
             },
-            'standalone': {
+            'StoryboardMaker Pro Standalone': {
                 'title': 'Your StoryboardMaker Pro Standalone License',
                 'duration': 'perpetual license',
                 'features': 'full access to all premium features',
                 'machines': '2 machines'
             },
-            'enterprise6': {
+            'StoryboardMaker Pro Enterprise 6': {
                 'title': 'Your StoryboardMaker Pro Enterprise 6 License',
                 'duration': 'perpetual license',
                 'features': 'full enterprise features',
                 'machines': '6 machines'
             },
-            'enterprise10': {
+            'StoryboardMaker Pro Enterprise 10': {
                 'title': 'Your StoryboardMaker Pro Enterprise 10 License',
                 'duration': 'perpetual license',
                 'features': 'full enterprise features',
                 'machines': '10 machines'
             },
-            'enterprise20': {
+            'StoryboardMaker Pro Enterprise 20': {
                 'title': 'Your StoryboardMaker Pro Enterprise 20 License',
                 'duration': 'perpetual license',
                 'features': 'full enterprise features',
@@ -555,7 +555,8 @@ def send_license_email(email, license_key, first_name, license_type='trial'):
             }
         }
         
-        license_info = license_descriptions.get(license_type, license_descriptions['trial'])
+        # Récupérer les informations de licence
+        license_info = license_type_mapping.get(license_type, license_type_mapping['StoryboardMaker Pro Trial'])
         
         subject = license_info['title']
         body = f"""
@@ -571,30 +572,20 @@ You have received a {license_info['duration']} with {license_info['features']}.
 This license can be activated on {license_info['machines']}.
 
 Getting Started:
-
-   1 Launch Capture One.
-   2 Start Storyboard maker pro create or setup.
-   3 Enter your mail and copy and paste your license key.
-   4 Start creating layouts, boards, or storyboards directly from Capture One!
-
-Key Features You Can Now Access:
-• Professional layout and board templates tailored for Capture One workflows.
-• Advanced export options for seamless integration into creative projects.
-• Custom panel layouts to suit your needs.
-• High-resolution exports for professional delivery.
-• Tools designed to optimize the workflow of photo DITs, photographers, and creative teams.
+   1. Launch Capture One
+   2. Start Storyboard Maker Pro Create or Setup
+   3. Enter your mail and paste your license key
+   4. Start creating layouts, boards, or storyboards directly from Capture One!
 
 Need Help?
-If you have any questions or need assistance, feel free to contact me at support@dityan.com.
+If you have any questions or need assistance, feel free to contact me at support@dityan.com
 
-{'Make the most of your trial period!' if license_type == 'trial' else 'Thank you for your purchase!'} I hope StoryboardMaker Pro helps you save time and elevate your creative output.
+{'Make the most of your trial period!' if 'Trial' in license_type else 'Thank you for your purchase!'}
 
 Best regards,
 Yan Senez
 Creator of StoryboardMaker Pro
-
-Note: Please keep this email for your records. Your license key may be needed for future reinstallations.
-        """
+"""
         
         msg = MIMEText(body)
         msg['Subject'] = subject
