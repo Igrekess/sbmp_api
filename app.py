@@ -678,9 +678,9 @@ def create_license():
         license_id = license_result['data']['id']
         KeygenAPI.create_machine(license_id, data['fingerprint'])
         
-        # Envoyer email  
+        # Envoyer email
         license_key = license_result['data']['attributes']['key']
-        if send_license_email(data['email'], license_key, data['license_type']):
+        if send_license_email(data['email'], license_key, data['first_name'], data['license_type']):    
             return jsonify({"success": True}), HTTPStatus.CREATED
         else:
             return jsonify({"success": False, "error": "Failed to send email"}), HTTPStatus.INTERNAL_SERVER_ERROR
