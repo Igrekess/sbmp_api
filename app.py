@@ -737,8 +737,8 @@ def handle_paypal_webhook():
     try:
         # Vérifier l'authenticité de la requête PayPal
         payload = request.get_json()
+        logger.info("PayPal webhook received")
         
-        # Vérifier la signature PayPal avec les en-têtes
         paypal_auth = verify_paypal_signature(request.headers, payload)
         if not paypal_auth:
             return jsonify({"success": False, "error": "Invalid PayPal signature"}), HTTPStatus.UNAUTHORIZED
@@ -754,6 +754,8 @@ def handle_paypal_webhook():
             'StoryboardMaker Pro Enterprise 10': Config.ENTERPRISE10_POLICY_ID,
             'StoryboardMaker Pro Enterprise 20': Config.ENTERPRISE20_POLICY_ID
         }
+        
+        logger.info(f"Processing payment for item: {payment_data['item_name']}")
         
         # Récupérer le policy_id correspondant
         policy_id = policy_mapping.get(payment_data['item_name'])
@@ -776,10 +778,17 @@ def handle_paypal_webhook():
             last_name=payment_data['last_name']
         )
         
-        # Envoyer l'email avec la clé de licence
+        # Envoyer l'email avec la clé de licence en utilisant le nom complet du produit
         license_key = license_result['data']['attributes']['key']
-        license_type = payment_data['item_name'].lower().replace('storyboardmaker pro ', '')
-        if send_license_email(payment_data['email'], license_key, payment_data['first_name'], license_type):
+        send_result = send_license_email(
+            payment_data['email'],
+            license_key,
+            payment_data['first_name'],
+            payment_data['item_name']  # Utiliser le nom complet du produit
+        )
+        
+        if send_result:
+            logger.info(f"License email sent successfully to {payment_data['email']}")
             return jsonify({"success": True}), HTTPStatus.CREATED
         else:
             logger.error("Failed to send license email")
@@ -809,15 +818,6 @@ def test_ipn():
     try:
         logger.info("Starting test IPN process")
         
-        # Mapping des produits vers les policy IDs
-        policy_mapping = {
-            'StoryboardMaker Pro Trial': Config.TRIAL_POLICY_ID,
-            'StoryboardMaker Pro Standalone': Config.STANDALONE_POLICY_ID,
-            'StoryboardMaker Pro Enterprise 6': Config.ENTERPRISE6_POLICY_ID, 
-            'StoryboardMaker Pro Enterprise 10': Config.ENTERPRISE10_POLICY_ID,
-            'StoryboardMaker Pro Enterprise 20': Config.ENTERPRISE20_POLICY_ID
-        }
-        
         # Simuler une notification PayPal
         test_payload = {
             'payment_status': 'Completed',
@@ -830,6 +830,14 @@ def test_ipn():
         }
         
         # Récupérer le policy_id correspondant
+        policy_mapping = {
+            'StoryboardMaker Pro Trial': Config.TRIAL_POLICY_ID,
+            'StoryboardMaker Pro Standalone': Config.STANDALONE_POLICY_ID,
+            'StoryboardMaker Pro Enterprise 6': Config.ENTERPRISE6_POLICY_ID, 
+            'StoryboardMaker Pro Enterprise 10': Config.ENTERPRISE10_POLICY_ID,
+            'StoryboardMaker Pro Enterprise 20': Config.ENTERPRISE20_POLICY_ID
+        }
+        
         policy_id = policy_mapping.get(test_payload['item_name'])
         if not policy_id:
             raise ValueError(f"Invalid product name: {test_payload['item_name']}")
@@ -842,7 +850,7 @@ def test_ipn():
         )
         logger.info(f"User created: {user_result}")
         
-        # Créer la licence avec le bon policy_id
+        # Créer la licence
         license_result = KeygenAPI.create_license(
             user_id=user_result['data']['id'],
             policy_id=policy_id,
@@ -851,14 +859,13 @@ def test_ipn():
         )
         logger.info(f"License created: {license_result}")
         
-        # Envoyer l'email
+        # Envoyer l'email avec le nom complet du produit
         license_key = license_result['data']['attributes']['key']
-        license_type = test_payload['item_name'].lower().replace('storyboardmaker pro ', '')
         send_result = send_license_email(
             test_payload['payer_email'],
             license_key,
             test_payload['first_name'],
-            license_type
+            test_payload['item_name']  # Utiliser le nom complet du produit
         )
         logger.info(f"Email sent: {send_result}")
         
@@ -866,7 +873,7 @@ def test_ipn():
             "success": True,
             "message": "Test IPN processed successfully",
             "license_key": license_key,
-            "license_type": license_type
+            "license_type": test_payload['item_name']
         })
         
     except Exception as e:
