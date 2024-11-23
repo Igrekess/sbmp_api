@@ -274,17 +274,14 @@ class KeygenAPI:
                 
                 # Vérifier si le fingerprint n'est pas enregistré
                 if meta_data.get('code') == 'NO_MACHINES':
-                    # Créer une nouvelle machine
                     license_id = license_data.get('id')
                     machine_result = KeygenAPI.create_machine(license_id, fingerprint)
                     if machine_result:
-                        # Relancer la validation
                         return KeygenAPI.validate_license(license_key, fingerprint, email)
                 
                 is_valid = meta_data.get('valid', False)
                 if is_valid:
                     policy_id = license_data.get('relationships', {}).get('policy', {}).get('data', {}).get('id')
-                    
                     policy_mapping = {
                         Config.TRIAL_POLICY_ID: {'type': 'trial', 'max_machines': 1},
                         Config.STANDALONE_POLICY_ID: {'type': 'standalone', 'max_machines': 2},
@@ -294,17 +291,15 @@ class KeygenAPI:
                     }
                     
                     license_info = policy_mapping.get(policy_id, {'type': 'unknown', 'max_machines': 0})
-                    
-                    # Utiliser maxMachines des attributs de la licence
                     max_machines = attributes.get('maxMachines', license_info['max_machines'])
                     machines_count = license_data.get('relationships', {}).get('machines', {}).get('meta', {}).get('count', 0)
                     
                     return {
                         "success": True,
-                        "licenseType": license_info['type'],
+                        "licenseType": attributes.get('name', license_info['type']),  # Utiliser le nom de la licence
                         "status": attributes.get('status', 'unknown'),
                         "expiry": attributes.get('expiry', 'N/A'),
-                        "machinesRemaining": max(0, max_machines - machines_count)  # Assurer que la valeur n'est pas négative
+                        "machinesRemaining": max(0, max_machines - machines_count)
                     }
                 else:
                     return {
