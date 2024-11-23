@@ -730,17 +730,23 @@ def extract_payment_data(payload):
 
 @app.route('/test-ipn', methods=['POST'])
 def test_ipn():
+    logger.info("Test IPN endpoint hit")
     try:
+        # Log au début
+        logger.info("Starting test IPN process")
+        
         # Simuler une notification PayPal
         test_payload = {
             'payment_status': 'Completed',
-            'payer_email': 'sacha.rovinski.fb@gmail.com',
-            'first_name': 'Sacha',
-            'last_name': 'Rovinskifb',
+            'payer_email': 'test@example.com',
+            'first_name': 'Test',
+            'last_name': 'User',
             'item_name': 'StoryboardMaker Pro Enterprise 20',
             'mc_gross': '299.00',
             'mc_currency': 'EUR'
         }
+        
+        logger.info(f"Creating user with payload: {test_payload}")
         
         # Créer l'utilisateur test
         user_result = KeygenAPI.create_user(
@@ -748,6 +754,7 @@ def test_ipn():
             last_name=test_payload['last_name'],
             email=test_payload['payer_email']
         )
+        logger.info(f"User created: {user_result}")
         
         # Créer la licence test
         license_result = KeygenAPI.create_license(
@@ -756,10 +763,12 @@ def test_ipn():
             first_name=test_payload['first_name'],
             last_name=test_payload['last_name']
         )
+        logger.info(f"License created: {license_result}")
         
         # Envoyer l'email test
         license_key = license_result['data']['attributes']['key']
-        send_license_email(test_payload['payer_email'], license_key, False)
+        send_result = send_license_email(test_payload['payer_email'], license_key, False)
+        logger.info(f"Email sent: {send_result}")
         
         return jsonify({
             "success": True,
@@ -768,7 +777,7 @@ def test_ipn():
         })
         
     except Exception as e:
-        logger.error(f"Test IPN error: {str(e)}")
+        logger.error(f"Test IPN error: {str(e)}", exc_info=True)
         return jsonify({
             "success": False,
             "error": str(e)
