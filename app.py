@@ -248,6 +248,7 @@ class KeygenAPI:
             "data": {
                 "type": "licenses",
                 "attributes": {
+                    "name" : license_type,
                     "metadata": {
                         "first_name": first_name,
                         "last_name": last_name
@@ -665,7 +666,8 @@ def create_license():
             user_id=user_id,
             policy_id=policy_id,
             first_name=data['first_name'],
-            last_name=data['last_name']
+            last_name=data['last_name'],
+            license_type=data['license_type']
         )
         
         # Enregistrer la machine
