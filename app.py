@@ -248,9 +248,9 @@ class KeygenAPI:
         """Valide une licence avec la clé via Keygen API
         
         Args:
-            license_key (str): Clé de licence à valider
-            fingerprint (str): Empreinte machine (non utilisé pour la validation)
-            email (str): Email de l'utilisateur
+            license_key (str): Clé de licence
+            fingerprint (str): Empreinte machine
+            email (str): Email utilisateur
         """
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses/actions/validate-key"
         
@@ -259,11 +259,14 @@ class KeygenAPI:
             "Content-Type": "application/json"
         }
         
-        # Simplification de la payload - uniquement key et email
+        # Structure de payload corrigée selon l'exemple AppleScript
         payload = {
             "meta": {
                 "key": license_key,
-                "email": email
+                "scope": {
+                    "user": email,
+                    "fingerprint": fingerprint
+                }
             }
         }
         
@@ -272,33 +275,47 @@ class KeygenAPI:
             response_data = response.json()
             
             if response.status_code == 200:
+                # Extraction des données comme dans l'AppleScript
+                meta_data = response_data.get('meta', {})
                 license_data = response_data.get('data', {})
-                policy_id = license_data.get('relationships', {}).get('policy', {}).get('data', {}).get('id')
+                attributes = license_data.get('attributes', {})
                 
-                policy_mapping = {
-                    Config.TRIAL_POLICY_ID: {'type': 'trial', 'max_machines': 1},
-                    Config.STANDALONE_POLICY_ID: {'type': 'standalone', 'max_machines': 2},
-                    Config.ENTERPRISE6_POLICY_ID: {'type': 'enterprise6', 'max_machines': 6},
-                    Config.ENTERPRISE10_POLICY_ID: {'type': 'enterprise10', 'max_machines': 10},
-                    Config.ENTERPRISE20_POLICY_ID: {'type': 'enterprise20', 'max_machines': 20}
-                }
+                is_valid = meta_data.get('valid', False)
                 
-                license_info = policy_mapping.get(policy_id, {'type': 'unknown', 'max_machines': 0})
-                
-                return {
-                    "success": True,
-                    "licenseType": license_info['type'],
-                    "expiry": license_data.get('attributes', {}).get('expiry'),
-                    "machinesRemaining": license_info['max_machines']
-                }
-            else:
-                error_msg = response_data.get('errors', [{'detail': 'Validation failed'}])[0]['detail']
-                logger.error(f"License validation failed: {error_msg}")
-                return {"success": False, "error": error_msg}
-                
+                # Si la licence est valide, récupérer toutes les informations
+                if is_valid:
+                    policy_id = license_data.get('relationships', {}).get('policy', {}).get('data', {}).get('id')
+                    
+                    policy_mapping = {
+                        Config.TRIAL_POLICY_ID: {'type': 'trial', 'max_machines': 1},
+                        Config.STANDALONE_POLICY_ID: {'type': 'standalone', 'max_machines': 2},
+                        Config.ENTERPRISE6_POLICY_ID: {'type': 'enterprise6', 'max_machines': 6},
+                        Config.ENTERPRISE10_POLICY_ID: {'type': 'enterprise10', 'max_machines': 10},
+                        Config.ENTERPRISE20_POLICY_ID: {'type': 'enterprise20', 'max_machines': 20}
+                    }
+                    
+                    license_info = policy_mapping.get(policy_id, {'type': 'unknown', 'max_machines': 0})
+                    
+                    return {
+                        "success": True,
+                        "licenseType": license_info['type'],
+                        "status": attributes.get('status', 'unknown'),
+                        "expiry": attributes.get('expiry', 'N/A'),
+                        "machinesRemaining": license_info['max_machines']
+                    }
+                else:
+                    error_msg = response_data.get('errors', [{'detail': 'Validation failed'}])[0]['detail']
+                    return {"success": False, "error": error_msg}
+                    
         except Exception as e:
             logger.error(f"License validation request failed: {str(e)}")
-            return {"success": False, "error": "Validation request failed"}
+            return {
+                "success": False, 
+                "error": "Validation request failed",
+                "status": "error",
+                "expiry": "N/A",
+                "machinesRemaining": 0
+            }
 
     @staticmethod
     def create_machine(license_id, fingerprint):
