@@ -632,30 +632,43 @@ def create_license():
             validate_email(data['email'])
         except ValueError:
             return jsonify({"success": False, "error": "Invalid email format"}), HTTPStatus.BAD_REQUEST
-            
+        
         if not all([data['first_name'].strip(), data['last_name'].strip()]):
             return jsonify({"success": False, "error": "Invalid name"}), HTTPStatus.BAD_REQUEST
-
+        
         # Vérifier utilisateur existant
         existing_user = KeygenAPI.get_user_by_email(data['email'])
         if existing_user and data['license_type'] == 'trial':
             return jsonify({"success": False, "error": "User already has a trial license"}), HTTPStatus.CONFLICT
-
+        
         # Créer nouvel utilisateur si nécessaire
         if not existing_user:
             user_result = KeygenAPI.create_user(
                 data['first_name'],
-                data['last_name'],
+                data['last_name'], 
                 data['email']
             )
             user_id = user_result['data']['id']
         else:
             user_id = existing_user['id']
+        
+        # Déterminer le nom de la licence en fonction du type
+        license_name_mapping = {
+            'trial': 'Trial License',
+            'standalone': 'Standalone License',
+            'enterprise6': 'Enterprise License (6 Users)',
+            'enterprise10': 'Enterprise License (10 Users)',
+            'enterprise20': 'Enterprise License (20 Users)'
+        }
+        license_name = license_name_mapping.get(data['license_type'])
 
+        if not license_name:
+            return jsonify({"success": False, "error": "Invalid license type"}), HTTPStatus.BAD_REQUEST
+        
         # Déterminer policy_id
         policy_mapping = {
             'trial': Config.TRIAL_POLICY_ID,
-            'standalone': Config.STANDALONE_POLICY_ID,
+            'standalone': Config.STANDALONE_POLICY_ID,  
             'enterprise6': Config.ENTERPRISE6_POLICY_ID,
             'enterprise10': Config.ENTERPRISE10_POLICY_ID,
             'enterprise20': Config.ENTERPRISE20_POLICY_ID
@@ -664,20 +677,21 @@ def create_license():
         
         if not policy_id:
             return jsonify({"success": False, "error": "Invalid license type"}), HTTPStatus.BAD_REQUEST
-
+        
         # Créer licence avec fingerprint
         license_result = KeygenAPI.create_license(
             user_id=user_id,
             policy_id=policy_id,
             first_name=data['first_name'],
-            last_name=data['last_name']
+            last_name=data['last_name'],
+            license_name=license_name
         )
         
         # Enregistrer la machine
         license_id = license_result['data']['id']
         KeygenAPI.create_machine(license_id, data['fingerprint'])
         
-        # Envoyer email
+        # Envoyer email  
         license_key = license_result['data']['attributes']['key']
         if send_license_email(data['email'], license_key, data['license_type']):
             return jsonify({"success": True}), HTTPStatus.CREATED
