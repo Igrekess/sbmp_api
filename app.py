@@ -214,12 +214,35 @@ class KeygenAPI:
 
     @staticmethod
     def create_license(user_id, policy_id, first_name, last_name):
+        """Crée une nouvelle licence
+        
+        Args:
+            user_id (str): ID utilisateur
+            policy_id (str): ID de la politique de licence (obligatoire)
+            first_name (str): Prénom
+            last_name (str): Nom
+        """
+        if not policy_id:
+            raise KeygenError("Policy ID cannot be null")
+            
         url = f"https://api.keygen.sh/v1/accounts/{Config.ACCOUNT_ID}/licenses"
         
         headers = {
             "Authorization": f"Bearer {Config.PRODUCT_TOKEN}",
             "Content-Type": "application/json"
         }
+        
+        # Vérification que policy_id existe dans les mappings
+        valid_policies = [
+            Config.TRIAL_POLICY_ID,
+            Config.STANDALONE_POLICY_ID,
+            Config.ENTERPRISE6_POLICY_ID,
+            Config.ENTERPRISE10_POLICY_ID,
+            Config.ENTERPRISE20_POLICY_ID
+        ]
+        
+        if policy_id not in valid_policies:
+            raise KeygenError(f"Invalid policy ID: {policy_id}")
         
         payload = {
             "data": {
@@ -231,13 +254,25 @@ class KeygenAPI:
                     }
                 },
                 "relationships": {
-                    "policy": {"data": {"type": "policies", "id": policy_id}},
-                    "user": {"data": {"type": "users", "id": user_id}}
+                    "policy": {
+                        "data": {
+                            "type": "policies",
+                            "id": policy_id
+                        }
+                    },
+                    "user": {
+                        "data": {
+                            "type": "users",
+                            "id": user_id
+                        }
+                    }
                 }
             }
         }
         
+        logger.debug(f"Creating license with payload: {payload}")
         response = requests.post(url, json=payload, headers=headers)
+        
         if response.status_code == 201:
             return response.json()
         raise KeygenError(f"Failed to create license: {response.text}")
