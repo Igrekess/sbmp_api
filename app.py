@@ -773,9 +773,9 @@ def test_ipn():
         # Simuler une notification PayPal
         test_payload = {
             'payment_status': 'Completed',
-            'payer_email': 'test@example.com',
-            'first_name': 'Test',
-            'last_name': 'User',
+            'payer_email': 'sacha.rovinski.fb@gmail.com',
+            'first_name': 'Sachyan',
+            'last_name': 'Ryvysy',
             'item_name': 'StoryboardMaker Pro Enterprise 20',
             'mc_gross': '299.00',
             'mc_currency': 'EUR'
